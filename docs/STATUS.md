@@ -119,9 +119,13 @@ No blockers found in the full playthrough beyond the accrual-push bug (fixed abo
   touch targets) but wasn't verified in an actual narrow/portrait emulated viewport — check
   this on your phone tonight, that's the real test anyway.
 
+- [Lead] Handoff: docs/TEST-PLAN.md (10-min friend test script, 5 questions, known-issues
+  table) and README.md (run instructions, what works, known issues, debug panel guide, tuning
+  location, publish-for-phone steps, next 5 tasks) written.
+
 ## In progress
 
-*(nothing — full playthrough and polish pass complete. Moving to handoff docs.)*
+*(nothing — vertical slice complete, QA'd, documented. Ready for the user's own phone test.)*
 
 ## Blocked
 

@@ -110,7 +110,10 @@ end
 -- actually consumed, so partial progress toward the next tick isn't lost once the
 -- stockpile is full. This is what makes the stockpile "catch up" correctly after being
 -- offline - whether that's running on a timer or the first check after rejoining.
-local function accrueFreeEggs(player, data)
+-- Returns true if it actually changed the stockpile (so callers know whether a client push
+-- is worth sending - the periodic tick uses this so it doesn't push every player every 5s
+-- for no reason, only when their stockpile genuinely just went up).
+local function accrueFreeEggs(player, data): boolean
 	local cooldownSeconds = debugShortTimers[player.UserId] and Config.DebugShortTimerSeconds
 		or Config.FreeEgg.CooldownSeconds
 
@@ -118,11 +121,13 @@ local function accrueFreeEggs(player, data)
 	local elapsed = os.time() - freeEgg.LastClaimedAt
 	local periodsPassed = math.floor(elapsed / cooldownSeconds)
 	if periodsPassed <= 0 then
-		return
+		return false
 	end
 
+	local before = freeEgg.Stockpile
 	freeEgg.Stockpile = math.min(Config.FreeEgg.StockpileCap, freeEgg.Stockpile + periodsPassed)
 	freeEgg.LastClaimedAt += periodsPassed * cooldownSeconds
+	return freeEgg.Stockpile ~= before
 end
 
 -- ---------------------------------------------------------------------------------------
@@ -355,7 +360,12 @@ function EggService.Start()
 			for _, player in Players:GetPlayers() do
 				local data = PlayerDataService.Get(player)
 				if data then
-					accrueFreeEggs(player, data)
+					if accrueFreeEggs(player, data) then
+						-- Stockpile just went up in the background - push so the client's
+						-- copy doesn't silently go stale until some unrelated action happens
+						-- to trigger the next push.
+						Remotes.Get("PlayerDataUpdated"):FireClient(player, data)
+					end
 
 					for slotIndex = 1, Config.IncubatorSlotCount do
 						local incubating = data.Incubators[slotIndex]

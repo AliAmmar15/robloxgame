@@ -43,7 +43,7 @@ local function renderTile(creatureId)
 
 	if discovered then
 		tile.Name.Text = creature.Name
-		tile.Name.TextColor3 = Config.RarityColor[creature.Rarity] or UIHelpers.Colors.TextOnDark
+		tile.Name.TextColor3 = Config.RarityTextColor[creature.Rarity] or UIHelpers.Colors.TextOnDark
 		tile.Rarity.Text = creature.Rarity
 		tile.Rarity.Visible = true
 		tile.Frame.BackgroundColor3 = UIHelpers.Colors.PanelRaised
@@ -163,7 +163,7 @@ function IndexUI.Init(gui)
 	counterLabel.Position = UDim2.new(0, 4, 0, 26)
 
 	local close = UIHelpers.Button(header, {
-		name = "Close", text = "✕", color = UIHelpers.Colors.Neutral,
+		name = "Close", text = "X", color = UIHelpers.Colors.Neutral,
 		height = 44, width = 44,
 		onClick = function() IndexUI.Toggle() end,
 	})

@@ -18,6 +18,15 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "EggHeistGui"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = false
+
+-- MUST be Sibling. A new ScreenGui defaults to Global here, which compares ZIndex across
+-- the WHOLE gui tree instead of among siblings - so a panel's contents (ZIndex 1) rendered
+-- and received input UNDERNEATH its own full-screen scrim (ZIndex 20). Every button inside
+-- every panel was unclickable, and taps fell through to the scrim and closed the panel.
+-- Caught in the Part B playtest. With Sibling, children are always layered above their
+-- parent's siblings, which is what all the panel code assumes.
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
 gui.Parent = playerGui
 
 RevealUI.Init(gui)

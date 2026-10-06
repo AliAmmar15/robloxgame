@@ -49,8 +49,8 @@ Config.CarrySlowdown = {
 	Mythic = 0.50,
 }
 
--- Display color per rarity - used by both World (placeholder creature models) and UI
--- (reveal screen, Index). Keep these two in sync; this is the one place to change it.
+-- SOLID/FILL color per rarity - creature placeholder models, the reveal banner background,
+-- the debug rarity buttons. Anything where the rarity color is a FILL behind dark text.
 Config.RarityColor = {
 	Common = Color3.fromRGB(165, 165, 165),
 	Uncommon = Color3.fromRGB(85, 170, 127),
@@ -58,6 +58,20 @@ Config.RarityColor = {
 	Epic = Color3.fromRGB(170, 85, 255),
 	Legendary = Color3.fromRGB(255, 170, 0),
 	Mythic = Color3.fromRGB(255, 85, 170),
+}
+
+-- TEXT color per rarity - brighter variants, used whenever the rarity color is the TEXT
+-- rather than the fill (incubator card titles, Index names, the reveal name).
+-- The fill colors above are too dark as text on the raised card background: measured
+-- 3.82:1 for Rare and 3.16:1 for Epic, both under the 4.5:1 minimum. These all clear
+-- 5.4:1 on PanelRaised and better on Panel. Don't use RarityColor for text.
+Config.RarityTextColor = {
+	Common = Color3.fromRGB(200, 200, 205),
+	Uncommon = Color3.fromRGB(130, 225, 170),
+	Rare = Color3.fromRGB(130, 185, 255),
+	Epic = Color3.fromRGB(205, 150, 255),
+	Legendary = Color3.fromRGB(255, 195, 70),
+	Mythic = Color3.fromRGB(255, 145, 200),
 }
 
 -- PLACEHOLDER sound IDs for the reveal screen, by rarity - these are NOT real purchased/

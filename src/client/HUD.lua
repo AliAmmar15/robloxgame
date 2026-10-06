@@ -47,8 +47,10 @@ local function refreshEggPill()
 	for _ in latestData.CarriedEggs do
 		carrying += 1
 	end
-	carryLabel.Text = carrying > 0 and ("Carrying " .. carrying .. (carrying > 1 and " eggs" or " egg")) or ""
-	carryLabel.Visible = carrying > 0
+	carryLabel.Text = carrying > 0 and ("🥚 Carrying " .. carrying) or ""
+	if HUD._carryPill then
+		HUD._carryPill.Visible = carrying > 0
+	end
 end
 
 function HUD.Init(gui)
@@ -124,20 +126,31 @@ function HUD.Init(gui)
 		muted = true, size = UDim2.new(1, 0, 0, 14), maxTextSize = 13,
 	})
 
-	-- carried-egg readout, directly under the pill (never overlaps the objective banner)
-	carryLabel = UIHelpers.Label(gui, "", {
+	-- Carried-egg readout, directly under the pill (never overlaps the objective banner).
+	-- It needs its OWN opaque background: floating text straight over the 3D world measured
+	-- 2.10:1 against grass, which fails badly. On the dark panel fill it clears 10:1.
+	local carryPill = Instance.new("Frame")
+	carryPill.Name = "CarryPill"
+	carryPill.Position = UDim2.new(0, insets.Side, 0, insets.Top + 54)
+	carryPill.Size = UDim2.new(0, 160, 0, 30)
+	carryPill.BackgroundColor3 = UIHelpers.Colors.Panel
+	carryPill.BackgroundTransparency = 0.08
+	carryPill.ZIndex = 10
+	carryPill.Visible = false
+	carryPill.Parent = gui
+	UIHelpers.Corner(carryPill, 10)
+	UIHelpers.Stroke(carryPill, UIHelpers.Colors.PanelRaised, 2)
+
+	carryLabel = UIHelpers.Label(carryPill, "", {
 		bold = true,
-		align = Enum.TextXAlignment.Left,
-		size = UDim2.new(0, 190, 0, 20),
-		maxTextSize = 16,
+		size = UDim2.new(1, -12, 1, -8),
+		maxTextSize = 15,
 	})
 	carryLabel.Name = "CarryCountLabel"
-	carryLabel.Position = UDim2.new(0, insets.Side + 4, 0, insets.Top + 54)
+	carryLabel.Position = UDim2.new(0, 6, 0, 4)
 	carryLabel.TextColor3 = UIHelpers.Colors.Primary
-	carryLabel.TextStrokeTransparency = 0.4
-	carryLabel.TextStrokeColor3 = UIHelpers.Colors.Scrim
 	carryLabel.ZIndex = 10
-	carryLabel.Visible = false
+	HUD._carryPill = carryPill
 
 	-- ===== TOP-RIGHT: debug toggle (visibility driven by the server attribute) =====
 	local debugBtn = UIHelpers.Button(gui, {

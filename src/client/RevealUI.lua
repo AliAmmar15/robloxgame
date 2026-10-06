@@ -176,7 +176,10 @@ function RevealUI.Show(creatureId, rarity)
 	local token = activeToken
 
 	local creature = Config.CreatureById[creatureId]
+	-- fill colour (glow, rays, banner background behind dark text) vs the brighter
+	-- text colour used for the creature name on the dark card. See Config.
 	local color = Config.RarityColor[rarity] or Color3.new(1, 1, 1)
+	local textColor = Config.RarityTextColor[rarity] or Color3.new(1, 1, 1)
 
 	-- paint everything in the rarity color
 	card.Glow.Color = color
@@ -234,7 +237,7 @@ function RevealUI.Show(creatureId, rarity)
 		UIHelpers.CreatureViewport(viewportHolder, creatureId, false)
 
 		nameLabel.Text = creature and creature.Name or creatureId
-		nameLabel.TextColor3 = color
+		nameLabel.TextColor3 = textColor
 
 		-- overshoot pop
 		card.Size = UDim2.fromOffset(250, 286)

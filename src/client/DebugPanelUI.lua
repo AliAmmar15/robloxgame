@@ -89,7 +89,7 @@ function DebugPanelUI.Init(gui)
 	title.Position = UDim2.new(0, 4, 0, 0)
 
 	local close = UIHelpers.Button(header, {
-		name = "Close", text = "✕", color = UIHelpers.Colors.Neutral,
+		name = "Close", text = "X", color = UIHelpers.Colors.Neutral,
 		height = 44, width = 44,
 		onClick = function() DebugPanelUI.Toggle() end,
 	})

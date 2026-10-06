@@ -81,7 +81,7 @@ local function renderSlot(slotIndex)
 	end
 
 	local creature = Config.CreatureById[incubating.CreatureId]
-	local rarityColor = Config.RarityColor[incubating.Rarity] or UIHelpers.Colors.TextOnDark
+	local rarityColor = Config.RarityTextColor[incubating.Rarity] or UIHelpers.Colors.TextOnDark
 	setViewport(card, incubating.CreatureId)
 
 	card.Title.Text = creature and creature.Name or incubating.CreatureId
@@ -247,7 +247,7 @@ function IncubatorUI.Init(gui)
 	title.Position = UDim2.new(0, 4, 0, 0)
 
 	local close = UIHelpers.Button(header, {
-		name = "Close", text = "✕", color = UIHelpers.Colors.Neutral,
+		name = "Close", text = "X", color = UIHelpers.Colors.Neutral,
 		height = 44, width = 44,
 		onClick = function() IncubatorUI.Toggle() end,
 	})

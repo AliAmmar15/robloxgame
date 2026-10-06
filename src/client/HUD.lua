@@ -55,7 +55,7 @@ function HUD.Init(gui: ScreenGui)
 	-- Small carried-egg counter, top-left, out of the way of the raid/reveal action.
 	local carryLabel = UIHelpers.MakeLabel(gui, "", 18)
 	carryLabel.Name = "CarryCountLabel"
-	carryLabel.Position = UDim2.new(0, 16, 0, 16)
+	carryLabel.Position = UDim2.new(0, 16, 0, 64)
 	carryLabel.Size = UDim2.new(0, 220, 0, 26)
 	carryLabel.TextXAlignment = Enum.TextXAlignment.Left
 	carryLabel.BackgroundTransparency = 1

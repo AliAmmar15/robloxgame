@@ -48,9 +48,29 @@ Update format per entry: `- [role] message (timestamp or phase)`
   stale CarriedEggs, give-free-egg works, short-timers correctly override 15min Uncommon down
   to ~10s on placement.
 
+- [UI] All client screens built: RevealUI (silhouette-then-name, rarity glow), IncubatorUI
+  (2 slots, live countdowns, place/collect), IndexUI (12-creature grid), HUD (toggle buttons,
+  carry count), TutorialUI (one-line prompts derived from data snapshot, never regresses),
+  NestInteractionUI (ProximityPrompts on nests -> GrabEgg -> reveal), DebugPanelUI (all 5
+  debug tools, always visible but server-gated). Also added `UIHelpers.lua` (shared button/
+  label/formatting helpers) and `Config.RarityColor` (centralizes colors World and UI both use).
+- [Lead] Fixed a real gap found while designing UI: `PlayerDataService.Load()` never pushed
+  initial state to the client, so a rejoining player's UI would start blank until their first
+  action. Now fires `PlayerDataUpdated` once right after load - documented in CONTRACTS.md.
+- [Lead] Playtested via MCP using real mouse clicks (not just InvokeServer) on the actual
+  rendered buttons: HUD toggle, in-panel Place Egg, debug toggle, and Reset My Data all
+  confirmed working end-to-end (click -> remote -> data change -> correct re-render).
+- **Known MCP tooling quirk**: `screen_capture` renders shallow ScreenGui children (HUD bar,
+  tutorial banner) correctly, but fails to visually render deeply-nested runtime-created
+  frames (e.g. the Incubator panel's slot rows) even though every property (color, text,
+  size, Visible) is correct on inspection and the buttons are fully clickable/functional.
+  Verified this is capture-only, not a real bug, by checking live property values and
+  functional clicks directly. Use property inspection + real clicks to verify UI, not
+  screenshots alone, if this comes up again.
+
 ## In progress
 
-*(nothing — Data, World, Egg, Raid, and debug panel backend complete. Starting UI next.)*
+*(nothing — Data, World, Egg, Raid, debug panel, and UI all complete and playtested. Starting QA pass next.)*
 
 ## Blocked
 

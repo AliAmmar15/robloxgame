@@ -27,9 +27,18 @@ Update format per entry: `- [role] message (timestamp or phase)`
 - Built live via MCP in Edit mode — **this only exists in the local .rbxl file, not git. Please
   save the place (Cmd+S) now.**
 
+- [Egg] `EggService.lua` — RollAndGrantEgg (called only by Raid), PlaceInIncubator, CollectHatch,
+  ClaimFreeEgg handlers, free-egg accrual from elapsed time, hatch-ready tick/notify loop.
+- [Egg] `DebugService.lua` — DebugForceRarity, DebugSkipTimer, both gated on `RunService:IsStudio()`.
+- [Egg] Playtested via MCP (InvokeServer from a real client context): claim -> place -> debug-skip
+  -> collect -> Index round trip all correct; double-collect on an emptied slot correctly
+  rejected ("That incubator is empty."). New profiles start with a full free-egg stockpile
+  (LastClaimedAt=0 reads as "infinitely overdue") - matches the GDD's "minute 0-1: collect the
+  free egg" onboarding goal, confirmed intentional not a bug.
+
 ## In progress
 
-*(nothing — Data and World roles complete, starting Egg next)*
+*(nothing — Data, World, Egg complete. Starting Raid next, then a combined Egg+Raid playtest.)*
 
 ## Blocked
 

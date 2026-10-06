@@ -172,8 +172,21 @@ local function rarestCarried(data)
 	return bestEgg
 end
 
--- Shows a small egg floating above the player's head while carrying, tinted and scaled
--- by rarity. Built on the SERVER so everyone sees it, not just the carrier.
+-- rarer = bigger, so "this one is heavy" reads at a glance as well as in the walkspeed
+local CARRY_SCALE_BY_RARITY = {
+	Common = 0.9, Uncommon = 1.0, Rare = 1.1, Epic = 1.2, Legendary = 1.35, Mythic = 1.5,
+}
+
+--[[
+	Shows a small egg floating above the player's head while carrying, tinted and scaled
+	by rarity. Built on the SERVER so everyone sees it, not just the carrier.
+
+	CAREFUL - this function is called on a 1s tick. Do NOT set `shell.CFrame` here.
+	The shell is welded to the head, and setting CFrame on a welded part moves the whole
+	assembly, which physically launched the player across the map every tick while they
+	were carrying (observed: 51-240 studs/s). Position is owned entirely by `weld.C0`,
+	which is a joint offset and is safe to change.
+]]
 local function updateCarryVisual(player, data)
 	local character = player.Character
 	local head = character and character:FindFirstChild("Head")
@@ -191,14 +204,15 @@ local function updateCarryVisual(player, data)
 		return
 	end
 
-	local color = Config.RarityColor[egg.Rarity] or Color3.new(1, 1, 1)
-	-- rarer = bigger, so "this one is heavy" reads at a glance as well as in the walkspeed
-	local scaleByRarity = {
-		Common = 0.9, Uncommon = 1.0, Rare = 1.1, Epic = 1.2, Legendary = 1.35, Mythic = 1.5,
-	}
-	local scale = scaleByRarity[egg.Rarity] or 1
+	-- Nothing to do if we're already showing exactly this rarity. Keeps the tick cheap and
+	-- avoids touching physics state for no reason.
+	if existing and existing:GetAttribute("Rarity") == egg.Rarity then
+		return
+	end
 
+	local scale = CARRY_SCALE_BY_RARITY[egg.Rarity] or 1
 	local shell = existing
+
 	if not shell then
 		shell = Instance.new("Part")
 		shell.Name = "CarriedEggVisual"
@@ -208,17 +222,29 @@ local function updateCarryVisual(player, data)
 		shell.CanQuery = false
 		shell.Massless = true
 		shell.Material = Enum.Material.SmoothPlastic
+		shell.Size = Vector3.new(1.1, 1.4, 1.1) * scale
+		-- place it once, BEFORE welding, so the weld captures a sane starting offset
+		shell.CFrame = head.CFrame * CFrame.new(0, 1.5 * scale, 0)
 		shell.Parent = head
 
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = shell
-		weld.Part1 = head
+		-- A real Weld (not WeldConstraint) so the offset lives in C0 and can be changed
+		-- later without dragging the character.
+		local weld = Instance.new("Weld")
+		weld.Name = "CarryWeld"
+		weld.Part0 = head
+		weld.Part1 = shell
+		weld.C0 = CFrame.new(0, 1.5 * scale, 0)
 		weld.Parent = shell
 	end
 
 	shell.Size = Vector3.new(1.1, 1.4, 1.1) * scale
-	shell.Color = color
-	shell.CFrame = head.CFrame * CFrame.new(0, 1.5 * scale, 0)
+	shell.Color = Config.RarityColor[egg.Rarity] or Color3.new(1, 1, 1)
+	shell:SetAttribute("Rarity", egg.Rarity)
+
+	local weld = shell:FindFirstChild("CarryWeld")
+	if weld then
+		weld.C0 = CFrame.new(0, 1.5 * scale, 0)
+	end
 end
 
 local function handleGrabEgg(player, nestIndex)

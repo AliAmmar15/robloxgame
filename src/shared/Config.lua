@@ -52,6 +52,13 @@ Config.CarrySlowdown = {
 Config.NestRespawnSeconds = 20 -- how long a raided NPC nest stays empty before a new egg appears
 Config.NestGrabRange = 8 -- studs - RaidService checks the player is actually this close
 
+-- UserIds allowed to use the Studio debug panel OUTSIDE of Studio (e.g. testing on a phone
+-- against the published place). Empty by default - add your own UserId here to test live.
+-- REMOVE WHITELIST BEFORE PUBLIC LAUNCH.
+Config.DebugWhitelist = {}
+
+Config.DebugShortTimerSeconds = 10 -- what "shorten all timers" sets incubation/free-egg cooldown to
+
 -- ---- Lookup tables, built once below from the lists above. Don't edit these by hand. ----
 
 Config.RarityById = {}

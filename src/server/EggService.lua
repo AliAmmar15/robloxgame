@@ -8,7 +8,8 @@
 	IMPORTANT: EggService does NOT connect the GrabEgg remote - RaidService does, because
 	grabbing is a raid action (it needs to check the player is near a nest first). RaidService
 	calls EggService.RollAndGrantEgg(player) as a plain function after it has already validated
-	the nest and emptied it. Don't call RollAndGrantEgg from anywhere except RaidService.
+	the nest and emptied it. The only other caller is DebugService's "give free egg" tool
+	(Studio/whitelist only) - don't call it from anywhere else.
 ]]
 
 local Players = game:GetService("Players")
@@ -33,6 +34,11 @@ local forcedRarity = {}
 -- sent, so the tick loop doesn't fire HatchReady over and over while a player leaves an
 -- incubator sitting there finished. Cleared on collect and on the player leaving.
 local notifiedHatchReady = {}
+
+-- userId -> true. Set by DebugService's "shorten all timers" tool (Studio/whitelist only).
+-- While on, new incubations and free-egg accrual use Config.DebugShortTimerSeconds instead
+-- of the real numbers. REMOVE WHITELIST BEFORE PUBLIC LAUNCH (see Config.DebugWhitelist).
+local debugShortTimers = {}
 
 -- ---------------------------------------------------------------------------------------
 -- Rolling
@@ -103,16 +109,19 @@ end
 -- actually consumed, so partial progress toward the next tick isn't lost once the
 -- stockpile is full. This is what makes the stockpile "catch up" correctly after being
 -- offline - whether that's running on a timer or the first check after rejoining.
-local function accrueFreeEggs(data)
+local function accrueFreeEggs(player, data)
+	local cooldownSeconds = debugShortTimers[player.UserId] and Config.DebugShortTimerSeconds
+		or Config.FreeEgg.CooldownSeconds
+
 	local freeEgg = data.FreeEgg
 	local elapsed = os.time() - freeEgg.LastClaimedAt
-	local periodsPassed = math.floor(elapsed / Config.FreeEgg.CooldownSeconds)
+	local periodsPassed = math.floor(elapsed / cooldownSeconds)
 	if periodsPassed <= 0 then
 		return
 	end
 
 	freeEgg.Stockpile = math.min(Config.FreeEgg.StockpileCap, freeEgg.Stockpile + periodsPassed)
-	freeEgg.LastClaimedAt += periodsPassed * Config.FreeEgg.CooldownSeconds
+	freeEgg.LastClaimedAt += periodsPassed * cooldownSeconds
 end
 
 -- ---------------------------------------------------------------------------------------
@@ -145,13 +154,16 @@ local function handlePlaceInIncubator(player, eggId, slotIndex)
 		return { ok = false, error = "Unknown rarity - this shouldn't happen." }
 	end
 
+	local incubationSeconds = debugShortTimers[player.UserId] and Config.DebugShortTimerSeconds
+		or rarity.IncubationSeconds
+
 	local now = os.time()
 	data.Incubators[slotIndex] = {
 		EggId = eggId,
 		CreatureId = carried.CreatureId,
 		Rarity = carried.Rarity,
 		StartedAt = now,
-		HatchAt = now + rarity.IncubationSeconds,
+		HatchAt = now + incubationSeconds,
 	}
 	data.CarriedEggs[eggId] = nil
 
@@ -202,7 +214,7 @@ local function handleClaimFreeEgg(player)
 		return { ok = false, error = "No data loaded yet." }
 	end
 
-	accrueFreeEggs(data) -- make sure the stockpile reflects elapsed time right now
+	accrueFreeEggs(player, data) -- make sure the stockpile reflects elapsed time right now
 
 	if data.FreeEgg.Stockpile <= 0 then
 		return { ok = false, error = "No free egg available yet." }
@@ -255,6 +267,57 @@ function EggService.SkipIncubatorTimer(player: Player, slotIndex: number)
 	return { ok = true }
 end
 
+-- Toggles the per-player "use 10s instead of the real numbers" debug flag. When turning it
+-- on, also immediately rewrites every currently-incubating egg to finish in
+-- Config.DebugShortTimerSeconds, so testing doesn't require re-placing eggs.
+function EggService.SetDebugShortTimers(player: Player, enabled: boolean)
+	debugShortTimers[player.UserId] = enabled or nil
+
+	if enabled then
+		local data = PlayerDataService.Get(player)
+		if data then
+			local shortHatchAt = os.time() + Config.DebugShortTimerSeconds
+			for slotIndex = 1, Config.IncubatorSlotCount do
+				local incubating = data.Incubators[slotIndex]
+				if incubating then
+					incubating.HatchAt = shortHatchAt
+				end
+			end
+			Remotes.Get("IncubatorUpdated"):FireClient(player, data.Incubators)
+			Remotes.Get("PlayerDataUpdated"):FireClient(player, data)
+		end
+	end
+
+	return { ok = true }
+end
+
+-- Instant roll+grant, bypassing the free-egg stockpile entirely. Just calls the same
+-- RollAndGrantEgg Raid uses for a real grab.
+function EggService.DebugGiveFreeEgg(player: Player)
+	local ok, eggId, creatureId, rarity = EggService.RollAndGrantEgg(player)
+	if not ok then
+		return { ok = false, error = "Could not grant an egg right now." }
+	end
+	return { ok = true, eggId = eggId, creatureId = creatureId, rarity = rarity }
+end
+
+-- Wipes the calling player back to a brand-new profile. Also clears this module's own
+-- per-player debug/notification state so nothing stale carries over into the fresh profile.
+function EggService.DebugResetData(player: Player)
+	PlayerDataService.ResetToFreshProfile(player)
+	forcedRarity[player.UserId] = nil
+	notifiedHatchReady[player.UserId] = nil
+	debugShortTimers[player.UserId] = nil
+
+	local data = PlayerDataService.Get(player)
+	if data then
+		Remotes.Get("IncubatorUpdated"):FireClient(player, data.Incubators)
+		Remotes.Get("PlayerDataUpdated"):FireClient(player, data)
+	end
+
+	return { ok = true }
+end
+
 -- ---------------------------------------------------------------------------------------
 -- Boot
 -- ---------------------------------------------------------------------------------------
@@ -275,6 +338,7 @@ function EggService.Start()
 	Players.PlayerRemoving:Connect(function(player)
 		forcedRarity[player.UserId] = nil
 		notifiedHatchReady[player.UserId] = nil
+		debugShortTimers[player.UserId] = nil
 	end)
 
 	-- Periodically: top up everyone's free-egg stockpile, and notify the client once when
@@ -285,7 +349,7 @@ function EggService.Start()
 			for _, player in Players:GetPlayers() do
 				local data = PlayerDataService.Get(player)
 				if data then
-					accrueFreeEggs(data)
+					accrueFreeEggs(player, data)
 
 					for slotIndex = 1, Config.IncubatorSlotCount do
 						local incubating = data.Incubators[slotIndex]

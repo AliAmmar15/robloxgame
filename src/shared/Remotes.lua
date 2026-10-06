@@ -14,6 +14,9 @@ local REMOTE_FUNCTION_NAMES = {
 	"CollectHatch",
 	"DebugForceRarity",
 	"DebugSkipTimer",
+	"DebugSetShortTimers",
+	"DebugGiveFreeEgg",
+	"DebugResetData",
 }
 
 local REMOTE_EVENT_NAMES = {

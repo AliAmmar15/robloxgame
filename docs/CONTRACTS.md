@@ -73,11 +73,23 @@ what the client sends (e.g. a nest ID must be checked to actually exist and actu
 | `HatchReady` | RemoteEvent | Server → Client | `{ slotIndex: number, creatureId: string }` | — (fires when a timer completes, so UI can show "ready") |
 | `CollectHatch` | RemoteFunction | Client → Server | `slotIndex: number` | `{ ok: boolean, creatureId: string?, isNewToIndex: boolean?, error: string? }` |
 | `PlayerDataUpdated` | RemoteEvent | Server → Client | full `PlayerData` (schema below) | — (fires after any change, UI just re-renders) |
-| `DebugForceRarity` | RemoteFunction | Client → Server | `rarity: string` | `{ ok: boolean, error: string? }` — **Studio-only, server must check `RunService:IsStudio()` and refuse otherwise** |
-| `DebugSkipTimer` | RemoteFunction | Client → Server | `slotIndex: number` | `{ ok: boolean, error: string? }` — **Studio-only, same check** |
+| `DebugForceRarity` | RemoteFunction | Client → Server | `rarity: string` | `{ ok: boolean, error: string? }` |
+| `DebugSkipTimer` | RemoteFunction | Client → Server | `slotIndex: number` | `{ ok: boolean, error: string? }` |
+| `DebugSetShortTimers` | RemoteFunction | Client → Server | `enabled: boolean` | `{ ok: boolean, error: string? }` — when on, new incubations + the free-egg cooldown use 10s instead of the real numbers, and every currently-incubating egg for that player is rewritten to finish in 10s |
+| `DebugGiveFreeEgg` | RemoteFunction | Client → Server | *(none)* | `{ ok: boolean, eggId: string?, creatureId: string?, rarity: string?, error: string? }` — instant roll+grant, bypasses the stockpile entirely |
+| `DebugResetData` | RemoteFunction | Client → Server | *(none)* | `{ ok: boolean, error: string? }` — wipes the calling player back to a brand-new profile |
 
 RemoteFunctions are used where the client needs an immediate yes/no (grab, place, claim, collect, debug).
 RemoteEvents are used for server-initiated pushes (state changed, timer finished).
+
+### Debug remote authorization — all 5 `Debug*` remotes, same rule
+
+A request is allowed only if `RunService:IsStudio()` is true **OR** the calling player's `UserId` is in
+`Config.DebugWhitelist` (a plain array of numbers, **empty by default**). This is the only way these tools
+can ever work in a published game — needed so the Lead can test on a phone tonight, where Studio obviously
+isn't running. `Config.DebugWhitelist` carries the comment `-- REMOVE WHITELIST BEFORE PUBLIC LAUNCH` right
+on the table, and the check itself repeats that comment in `DebugService.lua`. Never trust anything the
+client sends for this check — only `player.UserId`, read server-side.
 
 ## Egg ↔ Raid boundary (server-to-server call, not a Remote)
 
@@ -111,9 +123,15 @@ run on the server:
 6. RaidService returns the combined result (`ok`, `eggId`, `creatureId`, `rarity`) to the client as the
    `GrabEgg` response.
 
-**Carry slowdown reset** (RaidService's job): set `WalkSpeed` back to normal when the egg is delivered
-home, dropped, or the player's character dies (`Humanoid.Died`) — always use a changed-connection or
-cleanup so a dead/respawned character can't get stuck slow.
+**Carry slowdown reset** (RaidService's job): don't track "carrying" as separate state — recompute
+`WalkSpeed` from whatever is currently in `data.CarriedEggs` on a short tick (every ~1s is fine, same
+pattern as Egg's own tick loop). This is what makes speed recover automatically once `PlaceInIncubator`
+(Egg's remote) removes an egg from `CarriedEggs`, with no direct call from Egg into Raid needed.
+
+**On death** (`Humanoid.Died`): clear the player's `data.CarriedEggs` entirely (egg(s) are lost - same
+spirit as the GDD's "a caught raider drops the egg back into the nest," section 7) and reset `WalkSpeed`
+immediately rather than waiting for the next tick. Without this, a dead player respawns still "carrying"
+by the data, and the tick would just re-slow them right back down.
 
 **NPC nest respawn**: after a successful grab, that nest slot stays empty for `Config.NestRespawnSeconds`,
 then RaidService puts a fresh egg-grabbable state back (no player interaction needed — NPC dens always

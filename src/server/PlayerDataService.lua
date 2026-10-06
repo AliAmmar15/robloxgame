@@ -137,6 +137,16 @@ function PlayerDataService.Get(player: Player)
 	return cache[player.UserId]
 end
 
+-- Wipes a player back to a brand-new profile (used by the debug panel's "reset my data").
+-- Overwrites the cache in place; the next autosave/leave/shutdown will persist it like any
+-- other change. Does nothing if the player has no cached data (hasn't loaded yet).
+function PlayerDataService.ResetToFreshProfile(player: Player)
+	if not cache[player.UserId] then
+		return
+	end
+	cache[player.UserId] = newProfile()
+end
+
 -- Saves one player's current cached data. Safe to call any time; does nothing if a save
 -- for that player is already running, or if they have no cached data to save.
 function PlayerDataService.Save(player: Player)

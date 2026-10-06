@@ -36,9 +36,21 @@ Update format per entry: `- [role] message (timestamp or phase)`
   (LastClaimedAt=0 reads as "infinitely overdue") - matches the GDD's "minute 0-1: collect the
   free egg" onboarding goal, confirmed intentional not a bug.
 
+- [Raid] `RaidService.lua` — GrabEgg handler (distance + nest-state validation, empties nest
+  before granting), carry-speed tick (worst-of-all-carried, recovers automatically once
+  PlaceInIncubator empties CarriedEggs), death clears carried eggs + resets speed, nest respawn.
+  Playtested via MCP: too-far correctly rejected, successful grab applies correct slowdown,
+  immediate re-grab on emptied nest correctly rejected.
+- [Lead] Expanded debug panel per updated instructions: `Config.DebugWhitelist` (empty,
+  "REMOVE WHITELIST BEFORE PUBLIC LAUNCH"), `DebugSetShortTimers`, `DebugGiveFreeEgg`,
+  `DebugResetData` remotes added to CONTRACTS.md and implemented. All 5 debug remotes now
+  check Studio-or-whitelisted instead of Studio-only. Playtested via MCP: reset correctly wipes
+  stale CarriedEggs, give-free-egg works, short-timers correctly override 15min Uncommon down
+  to ~10s on placement.
+
 ## In progress
 
-*(nothing — Data, World, Egg complete. Starting Raid next, then a combined Egg+Raid playtest.)*
+*(nothing — Data, World, Egg, Raid, and debug panel backend complete. Starting UI next.)*
 
 ## Blocked
 

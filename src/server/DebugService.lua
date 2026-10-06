@@ -27,6 +27,18 @@ local function isDebugAllowed(player: Player): boolean
 end
 
 function DebugService.Start()
+	-- Loud, hard-to-miss reminder in the server log on every boot of a published place with
+	-- a non-empty whitelist - the comment on Config.DebugWhitelist is easy to forget about,
+	-- this isn't.
+	if not RunService:IsStudio() and #Config.DebugWhitelist > 0 then
+		warn(
+			"[DebugService] REMOVE WHITELIST BEFORE PUBLIC LAUNCH: Config.DebugWhitelist has "
+				.. #Config.DebugWhitelist
+				.. " UserId(s) in it and this is a published, non-Studio server. Debug tools "
+				.. "are live for those players right now."
+		)
+	end
+
 	Remotes.Get("DebugForceRarity").OnServerInvoke = function(player, rarity)
 		if not isDebugAllowed(player) then
 			return { ok = false, error = "Debug tools are not enabled for you." }

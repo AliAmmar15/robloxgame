@@ -19,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local PlayerDataService = require(script.Parent.PlayerDataService)
+local EventLog = require(script.Parent.EventLog)
 
 local EggService = {}
 
@@ -205,6 +206,8 @@ local function handleCollectHatch(player, slotIndex)
 	Remotes.Get("IncubatorUpdated"):FireClient(player, data.Incubators)
 	Remotes.Get("PlayerDataUpdated"):FireClient(player, data)
 
+	EventLog.FirstHatch(player, incubating.CreatureId)
+
 	return { ok = true, creatureId = incubating.CreatureId, isNewToIndex = isNew }
 end
 
@@ -251,6 +254,9 @@ function EggService.SkipIncubatorTimer(player: Player, slotIndex: number)
 		return { ok = false, error = "Bad request." }
 	end
 	slotIndex = math.floor(slotIndex)
+	if slotIndex < 1 or slotIndex > Config.IncubatorSlotCount then
+		return { ok = false, error = "Invalid incubator slot." }
+	end
 
 	local incubating = data.Incubators[slotIndex]
 	if not incubating then

@@ -15,11 +15,20 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local EggService = require(script.Parent.EggService)
+local EventLog = require(script.Parent.EventLog)
 
 local RaidService = {}
 
 local DEFAULT_WALK_SPEED = 16
 local SPEED_TICK_SECONDS = 1
+
+-- Speed-hack DETECTION only (not enforcement): WalkSpeed is a normal replicated Humanoid
+-- property, not something the server can stop a modified client from overriding locally -
+-- there's no PvP or other player-vs-player stakes today for that to actually exploit
+-- against, so a full server-authority movement system is out of scope for this prototype.
+-- This just logs if someone is moving implausibly fast, so it's visible if it ever matters.
+local SPEED_TOLERANCE_MULTIPLIER = 2.5 -- generous, to avoid false positives from jumps/falls/lag
+local lastPosition = {} -- userId -> Vector3, for the distance-per-tick check below
 
 -- nestIndex -> Part. Built once at Start() from World's tagged instances - never hardcode
 -- a Workspace path, World might reshuffle the layout.
@@ -121,6 +130,9 @@ local function handleGrabEgg(player, nestIndex)
 		applyCarrySpeed(player, data)
 	end
 
+	EventLog.FirstGrab(player)
+	EventLog.FirstReveal(player, creatureId, rarity)
+
 	return { ok = true, eggId = eggId, creatureId = creatureId, rarity = rarity }
 end
 
@@ -158,9 +170,15 @@ function RaidService.Start()
 		end
 	end)
 
+	Players.PlayerRemoving:Connect(function(player)
+		lastPosition[player.UserId] = nil
+	end)
+
 	-- Keep everyone's WalkSpeed matching what they're currently carrying. This is what
 	-- makes speed recover after PlaceInIncubator (Egg's remote) empties CarriedEggs,
-	-- without EggService needing to call into RaidService directly.
+	-- without EggService needing to call into RaidService directly. Also runs the speed
+	-- anomaly detection above.
+	local maxPlausibleDistance = DEFAULT_WALK_SPEED * SPEED_TICK_SECONDS * SPEED_TOLERANCE_MULTIPLIER
 	task.spawn(function()
 		while true do
 			task.wait(SPEED_TICK_SECONDS)
@@ -168,6 +186,27 @@ function RaidService.Start()
 				local data = PlayerDataService.Get(player)
 				if data then
 					applyCarrySpeed(player, data)
+				end
+
+				local character = player.Character
+				local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+				if rootPart then
+					local previous = lastPosition[player.UserId]
+					if previous then
+						local distance = (rootPart.Position - previous).Magnitude
+						if distance > maxPlausibleDistance then
+							warn(
+								"[RaidService] "
+									.. player.Name
+									.. " moved "
+									.. math.floor(distance)
+									.. " studs in "
+									.. SPEED_TICK_SECONDS
+									.. "s - faster than should be possible (detection only, not blocked)."
+							)
+						end
+					end
+					lastPosition[player.UserId] = rootPart.Position
 				end
 			end
 		end

@@ -25,7 +25,7 @@ local PlayerDataService = {}
 local STORE_NAME = "EggHeistArena_PlayerData_v1"
 local AUTOSAVE_INTERVAL_SECONDS = 60
 local RETRY_ATTEMPTS = 3
-local RETRY_WAIT_SECONDS = 2
+local RETRY_WAIT_SECONDS = 2 -- fixed delay between retries, NOT exponential backoff
 
 -- GetDataStore() itself throws immediately if API access isn't available (Studio with the
 -- setting off, or an unpublished place) - wrap it so that alone doesn't crash the whole
@@ -151,17 +151,26 @@ function PlayerDataService.ResetToFreshProfile(player: Player)
 	cache[player.UserId] = newProfile()
 end
 
--- Saves one player's current cached data. Safe to call any time; does nothing if a save
--- for that player is already running, or if they have no cached data to save.
+-- Saves one player's current cached data. Safe to call any time, including while another
+-- Save() for the same player is already running: this call WAITS for that one to finish
+-- (rather than silently skipping itself), then does its own fresh save with whatever the
+-- cache currently holds. This matters because PlayerRemoving/BindToClose must never skip a
+-- real save just because the 60s autosave happened to be mid-retry at that exact moment -
+-- a skipped save here would quietly lose a player's most recent progress.
 function PlayerDataService.Save(player: Player)
 	if not dataStore then
 		return -- already warned once at startup; nothing to try
 	end
 
 	local userId = player.UserId
+
+	while saveInFlight[userId] do
+		task.wait(0.1)
+	end
+
 	local data = cache[userId]
-	if not data or saveInFlight[userId] then
-		return
+	if not data then
+		return -- player already left and was released; nothing left to save
 	end
 	saveInFlight[userId] = true
 
@@ -169,7 +178,11 @@ function PlayerDataService.Save(player: Player)
 	local ok, err = attempt(function()
 		-- UpdateAsync (not SetAsync): if this throws partway through, nothing gets
 		-- written at all, so the last successfully-saved copy in the DataStore is
-		-- never partially overwritten by a failed attempt.
+		-- never partially overwritten by a failed attempt. (We always write our own
+		-- current cache regardless of what UpdateAsync's oldValue argument shows -
+		-- this server is the only one with this player loaded, so our cache is always
+		-- the freshest copy; this is UpdateAsync used for its atomic-write guarantee,
+		-- not for a merge-with-oldValue conflict resolution.)
 		dataStore:UpdateAsync(key, function()
 			return data
 		end)

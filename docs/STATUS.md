@@ -17,9 +17,19 @@ Update format per entry: `- [role] message (timestamp or phase)`
 - [Lead] CONTRACTS.md updated with the Egg↔Raid call boundary (`EggService.RollAndGrantEgg`) and
   the PlayerData access pattern (live mutable table, `os.time()` timers) before Data wrote code.
 
+- [World] `Workspace.Map.Den` — floor + 3 Parts tagged `NestSlot` (NestIndex 1-3).
+- [World] `Workspace.Map.PlayerBase` — floor + 2 Parts tagged `IncubatorSlot` (SlotIndex 1-2).
+- [World] Default `SpawnLocation` relocated to the den entrance (drops player straight into the
+  raid area, no teleport code needed for today's slice).
+- [World] `ReplicatedStorage.CreatureModels` — 12 placeholder Models, Name = CreatureId exactly
+  matching Config.lua, colored/sized by rarity tier. Verified via MCP: tag counts (3 nests, 2
+  incubator spots) and all 12 model names/rarities match Config exactly.
+- Built live via MCP in Edit mode — **this only exists in the local .rbxl file, not git. Please
+  save the place (Cmd+S) now.**
+
 ## In progress
 
-*(nothing — Data role complete, waiting to start World/Egg/Raid)*
+*(nothing — Data and World roles complete, starting Egg next)*
 
 ## Blocked
 

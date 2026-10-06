@@ -100,6 +100,55 @@ Update format per entry: `- [role] message (timestamp or phase)`
 
 No blockers found in the full playthrough beyond the accrual-push bug (fixed above).
 
+## Visual pass (branch `visual-pass`) — Part A results
+
+Branch created from a clean tree at `bf4e615` so the whole pass can be reverted in one step.
+
+**A1 world** — rebuilt IN PLACE (Den / PlayerBase folders, NestSlot / IncubatorSlot tags, and
+NestIndex / SlotIndex attributes all preserved):
+- 230×220 grass ground replacing the bare baseplate; dirt path from the Den gate to the base.
+- Den: fenced yard with a 14-stud gate, barn, 5 trees, hay bales, bushes, 4 lanterns, and a
+  34-stud banner + beacon landmark.
+- Nests 3 → 6. Verified RaidService / NestInteractionUI / TutorialUI find nests **by tag** with
+  no hardcoded counts or paths; both services now also listen to `GetInstanceAddedSignal` so a
+  future change in nest count needs no code edit.
+- Player base 72 studs from the Den (brief asked 60–80): picket fence, HOME sign, welcome mat,
+  2 glowing incubator stands with SLOT billboards. Spawn kept at the Den gate as instructed.
+- Verified programmatically: **no ground gaps** (raycast grid over the whole play area all hit
+  solid), **all 6 spawn→nest walk lines clear**, **spawn→base clear**, **beacon visible from
+  spawn** (47 studs, unoccluded), **no parts at the origin**.
+- Bug found and fixed during this: Roblox `Cylinder` parts run their length along **X**, so the
+  nest discs, incubator bowls and halos were malformed until their size tuples were corrected.
+
+**A2 eggs + creatures**:
+- Nest eggs are deliberately **rarity-neutral** (identical cream egg in every nest) so the nest
+  never leaks what's inside — the roll happens at pickup, per the GDD.
+- All 12 creatures rebuilt from parts, 10–26 parts each, distinct silhouettes/palettes. Names
+  still match Config IDs exactly; every model has a PrimaryPart.
+- The models are now actually **visible in game** for the first time, via ViewportFrames in the
+  Index, the reveal card, and the incubator cards. Before this they existed but were never shown.
+
+**A3 UI** — the headline complaint was dark text on a dark bar:
+- New design system allows only two pairings: Ink-on-bright and White-on-dark.
+- **Measured in a live session: 45 text items, 0 below 4.5:1** (worst 4.67:1 — the Epic rarity
+  button). The bottom bar went from unreadable to **11.5:1** (Incubators) and **9.0:1** (Index).
+- **17 buttons, 0 below 44×44.** Nothing off-screen at 1386×721.
+- Debug panel visibility now driven by a server-set `DebugAllowed` player attribute (documented
+  in CONTRACTS.md as **display-only** — every remote still re-checks authorization server-side).
+
+**A4 guidance/feel**: objective beam (yellow → nest, cyan → home) using Attachments + Beam,
+pickup sparkle, nest respawn puff, carry-egg-on-head scaled and tinted by rarity (built
+server-side so everyone sees it), button pressed states, camera nudge on reveal.
+
+**A5 stretch (guard NPC): NOT BUILT** — explicitly the first thing to cut per the brief, and
+Part B matters more.
+
+### Two real bugs caught from the live Output during this pass
+- Placeholder `rbxassetid://0` was logging "Failed to load sound" on **every** reveal. RevealUI
+  now skips any sound still set to the placeholder, so the console stays clean until real IDs land.
+- The speed detector was flooding the log on legitimate respawns/teleports. It now requires a
+  3-tick streak, has a 30s per-player cooldown, and skips the tick right after a character spawns.
+
 - [Lead] Polish pass: `Config.RaritySound` added (placeholder `rbxassetid://0` per tier, real
   IDs needed from user — volume/pitch already vary by tier), wired into `RevealUI.lua`. First-
   60-seconds structure was already in place (spawn point sits at the den, no menus before the

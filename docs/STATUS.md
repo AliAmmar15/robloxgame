@@ -68,9 +68,60 @@ Update format per entry: `- [role] message (timestamp or phase)`
   functional clicks directly. Use property inspection + real clicks to verify UI, not
   screenshots alone, if this comes up again.
 
+- [Lead] QA pass: 3 parallel read-only audits (exploits/data-safety/GDD-compliance), merged
+  into docs/QA-REPORT.md. Fixed the 1 blocker, addressed the 1 major as a scoped detection
+  (documented why full enforcement is out of scope), fixed the cheap minors, documented the
+  deferred ones. See QA-REPORT.md for full detail.
+- [Lead] Found and fixed one more real bug during full-playthrough testing (below): the
+  free-egg accrual tick updated Stockpile server-side but never pushed the change to the
+  client, risking a stale displayed number. Fixed, verified, committed.
+
+## Full playthrough (with evidence) — all via MCP against the real running server
+
+| Step | Result | Evidence |
+|---|---|---|
+| Join | ✅ | Console: `[EVENT] ... joined` |
+| Tutorial raid / grab egg | ✅ | `GrabEgg` → `{ok:true, rarity:"Common", creatureId:"gutterfox"}` from real nest proximity |
+| Reveal | ✅ | Same response feeds `RevealUI.Show` directly (rarity+creatureId never guessed client-side) |
+| Carry (slowed) | ✅ | WalkSpeed 16→15.2 after a Common grab (16×0.95 exactly); 16→11.2 for an Epic grab (16×0.70 exactly) |
+| Deliver / place in incubator | ✅ | `PlaceInIncubator` ok:true; WalkSpeed returned to 16 within 1 tick of placing the only carried egg |
+| Skip timer (debug) | ✅ | `DebugSkipTimer` ok:true, `HatchAt` moved to now without a new roll |
+| Hatch | ✅ | `CollectHatch` → `{ok:true, isNewToIndex:true, creatureId:...}` |
+| Creature in Index | ✅ | Confirmed `Index[creatureId] = true` in the pushed `PlayerDataUpdated` payload |
+| Leave and rejoin, data intact | ✅ | Set a carried Epic egg + 1 Index entry, stopped Play (BindToClose), restarted (fresh `Load()`) — both survived exactly |
+| Free Basic Egg timer/cap after rejoin | ✅ | Post-rejoin stockpile correctly re-accrued to the cap (2) from the restored `LastClaimedAt` |
+| Death drops carried egg | ✅ | Grabbed (WalkSpeed slowed) → `Humanoid.Health = 0` → carried-egg count back to 0 |
+| Nest respawn | ✅ | Re-grabbing the same nest immediately after a successful grab correctly failed ("nest is empty right now") |
+| Remote spam — GrabEgg (far away) | ✅ | 20 concurrent calls, 0 succeeded (distance check holds under spam) |
+| Remote spam — GrabEgg (valid, near nest) | ✅ | 15 concurrent calls on one nest, **exactly 1** succeeded — no duplication |
+| Remote spam — ClaimFreeEgg | ✅ | 20 concurrent calls on a freshly-capped stockpile, **exactly 2** succeeded — matches `StockpileCap`, no duplication |
+| Remote spam — PlaceInIncubator | ✅ | 15 concurrent calls with the same egg/slot, **exactly 1** succeeded |
+| Remote spam — CollectHatch | ✅ | 15 concurrent calls on one ready slot, **exactly 1** succeeded |
+
+No blockers found in the full playthrough beyond the accrual-push bug (fixed above).
+
+- [Lead] Polish pass: `Config.RaritySound` added (placeholder `rbxassetid://0` per tier, real
+  IDs needed from user — volume/pitch already vary by tier), wired into `RevealUI.lua`. First-
+  60-seconds structure was already in place (spawn point sits at the den, no menus before the
+  raid) — distance from spawn to the nearest nest is ~17 studs, comfortably under a few
+  seconds of walk time once a real player is in control.
+- **Known test gap**: `NestInteractionUI`'s `ProximityPrompt → GrabEgg → RevealUI.Show` chain
+  could not be exercised end-to-end via MCP — there's no way to synthetically trigger a real
+  `ProximityPrompt` hold in this environment, and calling `GrabEgg` directly (as all my other
+  tests do) bypasses the prompt entirely. Every piece of that chain is independently verified
+  (`GrabEgg` exhaustively tested; `RevealUI.Show`'s internals are plain property assignment,
+  same pattern verified working elsewhere) and `ProximityPrompt` itself is a simple, standard
+  Roblox API — but the literal "walk up and hold E / tap the prompt" path has only been
+  verified by code review, not a live test. **Please check this yourself first** when you playtest.
+- No mobile-device-emulation tool exists for Roblox Studio in this environment (only the
+  Browser pane has one, not applicable here). Layout follows Roblox's standard
+  mobile-responsive pattern throughout (Scale-based UDim2 sizing, `TextScaled` text, 44px+
+  touch targets) but wasn't verified in an actual narrow/portrait emulated viewport — check
+  this on your phone tonight, that's the real test anyway.
+
 ## In progress
 
-*(nothing — Data, World, Egg, Raid, debug panel, and UI all complete and playtested. Starting QA pass next.)*
+*(nothing — full playthrough and polish pass complete. Moving to handoff docs.)*
 
 ## Blocked
 

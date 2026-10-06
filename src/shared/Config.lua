@@ -60,6 +60,20 @@ Config.RarityColor = {
 	Mythic = Color3.fromRGB(255, 85, 170),
 }
 
+-- PLACEHOLDER sound IDs for the reveal screen, by rarity - these are NOT real purchased/
+-- uploaded sounds, just a format example ("rbxassetid://0" = silent, valid SoundId, won't
+-- error). Replace each with a real uploaded asset ID before this matters for real testing.
+-- Pitch/volume still vary by tier below even with placeholder silence, so the reveal isn't
+-- totally inert - swap SoundId first, tune Pitch/Volume to taste after.
+Config.RaritySound = {
+	Common = { SoundId = "rbxassetid://0", Volume = 0.5, Pitch = 1.0 },
+	Uncommon = { SoundId = "rbxassetid://0", Volume = 0.5, Pitch = 1.05 },
+	Rare = { SoundId = "rbxassetid://0", Volume = 0.6, Pitch = 1.1 },
+	Epic = { SoundId = "rbxassetid://0", Volume = 0.7, Pitch = 1.15 },
+	Legendary = { SoundId = "rbxassetid://0", Volume = 0.8, Pitch = 1.2 },
+	Mythic = { SoundId = "rbxassetid://0", Volume = 0.9, Pitch = 1.3 },
+}
+
 Config.NestRespawnSeconds = 20 -- how long a raided NPC nest stays empty before a new egg appears
 Config.NestGrabRange = 8 -- studs - RaidService checks the player is actually this close
 

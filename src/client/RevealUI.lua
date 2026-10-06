@@ -18,8 +18,13 @@ local SILHOUETTE_SECONDS = 0.9
 local AUTO_HIDE_SECONDS = 3.5
 
 local frame
+local sound
 
 function RevealUI.Init(gui: ScreenGui)
+	sound = Instance.new("Sound")
+	sound.Name = "RevealSound"
+	sound.Parent = gui
+
 	frame = Instance.new("Frame")
 	frame.Name = "RevealFrame"
 	frame.BackgroundColor3 = Color3.new(0, 0, 0)
@@ -99,6 +104,14 @@ function RevealUI.Show(creatureId: string, rarity: string)
 	rarityLabel.TextColor3 = color
 	rarityLabel.Text = rarity
 	nameLabel.Text = "???" -- silhouette stage: rarity + glow visible, name hidden
+
+	local soundConfig = Config.RaritySound[rarity]
+	if soundConfig then
+		sound.SoundId = soundConfig.SoundId
+		sound.Volume = soundConfig.Volume
+		sound.Pitch = soundConfig.Pitch
+		sound:Play()
+	end
 
 	frame.Visible = true
 	glow.Transparency = 0

@@ -15,8 +15,10 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Config = require(game:GetService("ReplicatedStorage").Shared.Config)
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
 
 local PlayerDataService = {}
 
@@ -103,6 +105,7 @@ function PlayerDataService.Load(player: Player)
 		local data = newProfile()
 		data.LastLoginAt = os.time()
 		cache[player.UserId] = data
+		Remotes.Get("PlayerDataUpdated"):FireClient(player, data)
 		return
 	end
 
@@ -129,6 +132,7 @@ function PlayerDataService.Load(player: Player)
 
 	data.LastLoginAt = os.time()
 	cache[player.UserId] = data
+	Remotes.Get("PlayerDataUpdated"):FireClient(player, data)
 end
 
 -- Returns the live data table for a player (nil if they haven't loaded yet, or already

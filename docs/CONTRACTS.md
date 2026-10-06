@@ -37,8 +37,17 @@ src/client/
   IndexUI.lua               UI — discovered-creatures screen
   HUD.lua                   UI — simple always-on HUD
   TutorialUI.lua             UI — first-60-seconds prompts
-  DebugPanelUI.lua           UI — Studio-only panel, calls the Debug remotes
+  NestInteractionUI.lua      UI — ProximityPrompts on each NestSlot part, calls GrabEgg,
+                                   hands the result to RevealUI/TutorialUI
+  DebugPanelUI.lua           UI — debug panel, calls the Debug remotes (not Studio-only
+                                   client-side - server enforces Studio-or-whitelist; see
+                                   "Debug remote authorization" below)
 ```
+
+**Scope simplification for today**: the incubator panel is reachable from the HUD from anywhere
+(no physical walk-to-base + tap required to open it) - placing/collecting still goes through the
+real server remotes with all the same validation, this only changes how the *panel* opens. Grabbing
+from a nest still requires real proximity (enforced server-side by RaidService, see NestGrabRange).
 
 Nobody edits another role's file directly. If Egg needs a new Remote, Data adds it to `Remotes.lua`
 (two-line add, low conflict risk) — or Egg adds it and flags it in STATUS.md for Data to review.
@@ -72,7 +81,7 @@ what the client sends (e.g. a nest ID must be checked to actually exist and actu
 | `IncubatorUpdated` | RemoteEvent | Server → Client | `incubators: table` (full current state, see schema) | — |
 | `HatchReady` | RemoteEvent | Server → Client | `{ slotIndex: number, creatureId: string }` | — (fires when a timer completes, so UI can show "ready") |
 | `CollectHatch` | RemoteFunction | Client → Server | `slotIndex: number` | `{ ok: boolean, creatureId: string?, isNewToIndex: boolean?, error: string? }` |
-| `PlayerDataUpdated` | RemoteEvent | Server → Client | full `PlayerData` (schema below) | — (fires after any change, UI just re-renders) |
+| `PlayerDataUpdated` | RemoteEvent | Server → Client | full `PlayerData` (schema below) | — (fires after any change, AND once right after load/join so UI has initial state immediately — UI just re-renders, never diffs) |
 | `DebugForceRarity` | RemoteFunction | Client → Server | `rarity: string` | `{ ok: boolean, error: string? }` |
 | `DebugSkipTimer` | RemoteFunction | Client → Server | `slotIndex: number` | `{ ok: boolean, error: string? }` |
 | `DebugSetShortTimers` | RemoteFunction | Client → Server | `enabled: boolean` | `{ ok: boolean, error: string? }` — when on, new incubations + the free-egg cooldown use 10s instead of the real numbers, and every currently-incubating egg for that player is rewritten to finish in 10s |

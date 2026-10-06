@@ -49,6 +49,17 @@ Config.CarrySlowdown = {
 	Mythic = 0.50,
 }
 
+-- Display color per rarity - used by both World (placeholder creature models) and UI
+-- (reveal screen, Index). Keep these two in sync; this is the one place to change it.
+Config.RarityColor = {
+	Common = Color3.fromRGB(165, 165, 165),
+	Uncommon = Color3.fromRGB(85, 170, 127),
+	Rare = Color3.fromRGB(85, 140, 255),
+	Epic = Color3.fromRGB(170, 85, 255),
+	Legendary = Color3.fromRGB(255, 170, 0),
+	Mythic = Color3.fromRGB(255, 85, 170),
+}
+
 Config.NestRespawnSeconds = 20 -- how long a raided NPC nest stays empty before a new egg appears
 Config.NestGrabRange = 8 -- studs - RaidService checks the player is actually this close
 

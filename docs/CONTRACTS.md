@@ -79,6 +79,46 @@ what the client sends (e.g. a nest ID must be checked to actually exist and actu
 RemoteFunctions are used where the client needs an immediate yes/no (grab, place, claim, collect, debug).
 RemoteEvents are used for server-initiated pushes (state changed, timer finished).
 
+## Egg ↔ Raid boundary (server-to-server call, not a Remote)
+
+The `GrabEgg` RemoteFunction is connected by **RaidService** (grabbing is a raid action), not EggService.
+RaidService and EggService then talk to each other with a plain function call — no Remote involved, both
+run on the server:
+
+1. Client fires `GrabEgg(nestIndex)`.
+2. **RaidService** validates the request: is the player actually near that nest (server-side distance
+   check, using `Config.NestGrabRange`), does that nest slot still have an egg, is it off cooldown/not
+   respawning. Any failure → return `{ ok = false, error = "..." }` immediately, call nothing else.
+3. If valid, **RaidService marks the nest slot empty first** (and starts its respawn timer), *before*
+   granting anything — this is what stops a player from firing `GrabEgg` twice in the same frame and
+   getting two eggs from one nest.
+4. **RaidService then calls `EggService.RollAndGrantEgg(player)`** — a plain Luau function, defined and
+   owned by EggService:
+
+   ```lua
+   -- EggService.lua
+   -- Rolls a creature by Basic Egg odds, creates a new entry in player.CarriedEggs, and returns it.
+   -- Only ever called by RaidService, after RaidService has already validated the nest and emptied it.
+   -- Does its own roll — the caller never picks the rarity.
+   function EggService.RollAndGrantEgg(player: Player): (boolean, string?, string?, string?)
+       -- returns: ok, eggId, creatureId, rarity  (last three are nil if ok == false)
+   end
+   ```
+
+5. RaidService takes the `rarity` from that result and applies the carry slowdown
+   (`Config.CarrySlowdown[rarity]` on the player's `Humanoid.WalkSpeed`) — carry mechanics belong to Raid,
+   not Egg.
+6. RaidService returns the combined result (`ok`, `eggId`, `creatureId`, `rarity`) to the client as the
+   `GrabEgg` response.
+
+**Carry slowdown reset** (RaidService's job): set `WalkSpeed` back to normal when the egg is delivered
+home, dropped, or the player's character dies (`Humanoid.Died`) — always use a changed-connection or
+cleanup so a dead/respawned character can't get stuck slow.
+
+**NPC nest respawn**: after a successful grab, that nest slot stays empty for `Config.NestRespawnSeconds`,
+then RaidService puts a fresh egg-grabbable state back (no player interaction needed — NPC dens always
+have a target, per the GDD).
+
 ## Data shapes
 
 ### PlayerData (what DataStore saves, one record per player)
@@ -154,10 +194,28 @@ Config.CarrySlowdown = {
   -- walkspeed multiplier while carrying a revealed egg, by rarity
   Common = 0.95, Uncommon = 0.90, Rare = 0.80, Epic = 0.70, Legendary = 0.60, Mythic = 0.50,
 }
+
+Config.NestRespawnSeconds = 20   -- how long a raided NPC nest stays empty before a new egg appears
+Config.NestGrabRange = 8          -- studs — RaidService checks the player is actually this close
 ```
 
 Roll logic (Egg owns this): pick a random tier using `BasicEggOdds` as weights, then pick uniformly among
 that tier's creatures (today, 2 per tier → 50/50 within the tier).
+
+### PlayerData access pattern
+
+`PlayerDataService.Get(player)` returns the **live, mutable table** for that player (not a copy). Egg,
+Raid, etc. read and write fields on it directly (e.g. `data.Index[creatureId] = true`). PlayerDataService
+itself only handles *when* that table gets written to the DataStore (autosave timer, on leave, on
+shutdown) — it doesn't provide setter functions for every field, to keep this simple for the prototype.
+One consequence: always get a fresh reference with `PlayerDataService.Get(player)` right before reading/
+writing — don't cache the table across a `task.wait`, in case the player left in between.
+
+All timers (`RevealedAt`, `StartedAt`, `HatchAt`, `LastClaimedAt`) are `os.time()` on the **server** —
+never a `wait()`-based countdown. This is what makes incubation and the free-egg cooldown keep progressing
+while the player is offline: on login, compare `os.time()` against the stored timestamp to work out what's
+already finished (an incubator may already be done hatching, a free egg stockpile may have refilled more
+than once) instead of resuming a loop from where it left off.
 
 ## Naming conventions
 

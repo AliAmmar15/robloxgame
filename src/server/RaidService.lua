@@ -282,6 +282,11 @@ local function setupCharacter(player, character)
 	local humanoid = character:WaitForChild("Humanoid")
 	humanoid.WalkSpeed = DEFAULT_WALK_SPEED
 
+	-- the jump from "no character" / old corpse position to the spawn point is not a cheat
+	skipNextSpeedCheck[player.UserId] = true
+	lastPosition[player.UserId] = nil
+	speedStreak[player.UserId] = 0
+
 	humanoid.Died:Connect(function()
 		-- Same spirit as the GDD's "a caught raider drops the egg back into the nest"
 		-- (section 7): whatever this player was carrying is lost. This also has to happen
@@ -343,6 +348,9 @@ function RaidService.Start()
 
 	Players.PlayerRemoving:Connect(function(player)
 		lastPosition[player.UserId] = nil
+		speedStreak[player.UserId] = nil
+		lastSpeedWarn[player.UserId] = nil
+		skipNextSpeedCheck[player.UserId] = nil
 	end)
 
 	-- Keep everyone's WalkSpeed matching what they're currently carrying. This is what
@@ -363,22 +371,38 @@ function RaidService.Start()
 				local character = player.Character
 				local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 				if rootPart then
-					local previous = lastPosition[player.UserId]
-					if previous then
+					local userId = player.UserId
+					local previous = lastPosition[userId]
+
+					if skipNextSpeedCheck[userId] then
+						-- character just (re)spawned; this tick's "distance" is a teleport
+						skipNextSpeedCheck[userId] = nil
+						speedStreak[userId] = 0
+					elseif previous then
 						local distance = (rootPart.Position - previous).Magnitude
 						if distance > maxPlausibleDistance then
-							warn(
-								"[RaidService] "
-									.. player.Name
-									.. " moved "
-									.. math.floor(distance)
-									.. " studs in "
-									.. SPEED_TICK_SECONDS
-									.. "s - faster than should be possible (detection only, not blocked)."
-							)
+							speedStreak[userId] = (speedStreak[userId] or 0) + 1
+							local now = os.time()
+							local quiet = (now - (lastSpeedWarn[userId] or 0)) >= SPEED_WARN_COOLDOWN
+							if speedStreak[userId] >= SPEED_WARN_STREAK and quiet then
+								lastSpeedWarn[userId] = now
+								warn(
+									"[RaidService] "
+										.. player.Name
+										.. " sustained implausible movement ("
+										.. math.floor(distance)
+										.. " studs in "
+										.. SPEED_TICK_SECONDS
+										.. "s, "
+										.. speedStreak[userId]
+										.. " ticks running) - detection only, not blocked."
+								)
+							end
+						else
+							speedStreak[userId] = 0
 						end
 					end
-					lastPosition[player.UserId] = rootPart.Position
+					lastPosition[userId] = rootPart.Position
 				end
 			end
 		end

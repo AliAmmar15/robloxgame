@@ -100,6 +100,24 @@ isn't running. `Config.DebugWhitelist` carries the comment `-- REMOVE WHITELIST 
 on the table, and the check itself repeats that comment in `DebugService.lua`. Never trust anything the
 client sends for this check — only `player.UserId`, read server-side.
 
+### `DebugAllowed` player attribute (display only — NOT a security boundary)
+
+`DebugService.Start()` sets a **player attribute** `DebugAllowed` (boolean) on every player, using the
+exact same `isDebugAllowed()` check as the remotes above. `HUD.lua` reads it to decide whether to show
+the 🛠 button at all, and calls `DebugPanelUI.ForceHide()` when it is false.
+
+This exists **only** so a normal player isn't shown a button that would do nothing. It is deliberately
+**not** relied on for safety:
+
+- Attributes replicate to clients, so a modified client can read or locally fake it.
+- Faking it only makes the panel appear. Every button in that panel still calls a real `Debug*` remote,
+  and every one of those re-runs `isDebugAllowed()` **server-side**, so a forced-open panel is just a
+  panel of buttons that all return `"Debug tools are not enabled for you."`
+- No new remote was added for this; the attribute rides the normal replication Roblox already does.
+
+**Never** move the authorization decision onto this attribute. The server-side check in each remote
+handler is the real gate, and must stay.
+
 ## Egg ↔ Raid boundary (server-to-server call, not a Remote)
 
 The `GrabEgg` RemoteFunction is connected by **RaidService** (grabbing is a raid action), not EggService.

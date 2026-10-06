@@ -10,6 +10,7 @@
 	in that list could use these tools in the live game forever.
 ]]
 
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -26,7 +27,20 @@ local function isDebugAllowed(player: Player): boolean
 	return table.find(Config.DebugWhitelist, player.UserId) ~= nil
 end
 
+-- Publishes the SAME answer to the client as a player attribute, purely so the UI can
+-- hide the debug button for people who can't use it. This is a convenience for display
+-- only - every remote handler below still calls isDebugAllowed() itself, so faking this
+-- attribute client-side would just produce a panel whose buttons all return an error.
+local function publishDebugFlag(player: Player)
+	player:SetAttribute("DebugAllowed", isDebugAllowed(player))
+end
+
 function DebugService.Start()
+	Players.PlayerAdded:Connect(publishDebugFlag)
+	for _, player in Players:GetPlayers() do
+		publishDebugFlag(player) -- catches anyone already connected when the server booted
+	end
+
 	-- Loud, hard-to-miss reminder in the server log on every boot of a published place with
 	-- a non-empty whitelist - the comment on Config.DebugWhitelist is easy to forget about,
 	-- this isn't.

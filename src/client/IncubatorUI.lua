@@ -1,13 +1,14 @@
 --[[
 	IncubatorUI.lua
 
-	The incubator panel: 2 slots, each showing empty / counting down / ready-to-collect.
-	Tapping an empty slot places whichever carried egg comes first (simple and fine for a
-	2-slot prototype); tapping a ready slot collects it. Reachable from the HUD from
-	anywhere - see CONTRACTS.md's "scope simplification for today" note.
+	One card per incubator slot. Each card shows the actual creature model (it was
+	already revealed at pickup, so there's nothing to hide here), its name in its
+	rarity color, a progress bar, and the time left - or a big Collect button.
+
+	Opening the panel is allowed from anywhere; placing/collecting still goes through
+	the real server remotes with full validation (see docs/CONTRACTS.md).
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -16,189 +17,277 @@ local UIHelpers = require(script.Parent.UIHelpers)
 
 local IncubatorUI = {}
 
-local frame
-local slotFrames = {} -- slotIndex -> { Container, NameLabel, StatusLabel, ActionButton }
-local latestData = nil -- most recent full PlayerData from the server
+local root, scrim
+local cards = {} -- slotIndex -> widget table
+local latestData
 
-local function firstCarriedEgg(data)
-	for eggId, egg in data.CarriedEggs do
+local function firstCarriedEgg()
+	if not latestData then
+		return nil, nil
+	end
+	for eggId, egg in latestData.CarriedEggs do
 		return eggId, egg
 	end
 	return nil, nil
 end
 
-local function renderSlot(slotIndex)
-	local widgets = slotFrames[slotIndex]
-	if not widgets or not latestData then
+local function setViewport(card, creatureId)
+	if card.currentCreature == creatureId then
 		return
 	end
+	card.currentCreature = creatureId
+	for _, c in card.ViewportHolder:GetChildren() do
+		if c:IsA("ViewportFrame") or c:IsA("TextLabel") then
+			c:Destroy()
+		end
+	end
+	if creatureId then
+		UIHelpers.CreatureViewport(card.ViewportHolder, creatureId, false)
+	else
+		local q = UIHelpers.Label(card.ViewportHolder, "—", { bold = true, muted = true })
+		q.Size = UDim2.fromScale(1, 1)
+	end
+end
 
+local function renderSlot(slotIndex)
+	local card = cards[slotIndex]
+	if not card or not latestData then
+		return
+	end
 	local incubating = latestData.Incubators[slotIndex]
 
 	if not incubating then
-		local eggId, egg = firstCarriedEgg(latestData)
+		setViewport(card, nil)
+		card.Title.Text = "Empty slot " .. slotIndex
+		card.Title.TextColor3 = UIHelpers.Colors.TextOnDark
+		card.Track.Visible = false
+
+		local eggId, egg = firstCarriedEgg()
 		if eggId then
 			local creature = Config.CreatureById[egg.CreatureId]
-			widgets.NameLabel.Text = "Empty slot"
-			widgets.StatusLabel.Text = "Tap to place: " .. (creature and creature.Name or egg.CreatureId)
-			widgets.ActionButton.Text = "Place Egg"
-			widgets.ActionButton.Visible = true
-			widgets.ActionButton.Active = true
+			card.Subtitle.Text = "Ready to place"
+			card.Action.Visible = true
+			card.Action.Text = "Place " .. (creature and creature.Name or egg.CreatureId)
+			card.Action.BackgroundColor3 = UIHelpers.Colors.Primary
+			card.action = function()
+				Remotes.Get("PlaceInIncubator"):InvokeServer(eggId, slotIndex)
+			end
 		else
-			widgets.NameLabel.Text = "Empty slot"
-			widgets.StatusLabel.Text = "Grab an egg to fill this"
-			widgets.ActionButton.Visible = false
+			card.Subtitle.Text = "Raid the den for an egg"
+			card.Action.Visible = false
+			card.action = nil
 		end
 		return
 	end
 
 	local creature = Config.CreatureById[incubating.CreatureId]
-	widgets.NameLabel.Text = creature and creature.Name or incubating.CreatureId
-	widgets.NameLabel.TextColor3 = Config.RarityColor[incubating.Rarity] or UIHelpers.Colors.Text
+	local rarityColor = Config.RarityColor[incubating.Rarity] or UIHelpers.Colors.TextOnDark
+	setViewport(card, incubating.CreatureId)
+
+	card.Title.Text = creature and creature.Name or incubating.CreatureId
+	card.Title.TextColor3 = rarityColor
 
 	local remaining = incubating.HatchAt - os.time()
 	if remaining <= 0 then
-		widgets.StatusLabel.Text = "Ready to hatch!"
-		widgets.ActionButton.Text = "Collect"
-		widgets.ActionButton.Visible = true
-		widgets.ActionButton.Active = true
+		card.Subtitle.Text = incubating.Rarity .. " · ready!"
+		card.Track.Visible = false
+		card.Action.Visible = true
+		card.Action.Text = "✨ Collect"
+		card.Action.BackgroundColor3 = UIHelpers.Colors.Success
+		card.action = function()
+			Remotes.Get("CollectHatch"):InvokeServer(slotIndex)
+		end
 	else
-		widgets.StatusLabel.Text = UIHelpers.FormatDuration(remaining) .. " remaining"
-		widgets.ActionButton.Visible = false
+		local total = math.max(1, incubating.HatchAt - incubating.StartedAt)
+		card.Subtitle.Text = incubating.Rarity .. " · " .. UIHelpers.FormatDuration(remaining) .. " left"
+		card.Track.Visible = true
+		card.setProgress(1 - (remaining / total))
+		card.Action.Visible = false
+		card.action = nil
 	end
 end
 
 local function renderAll()
-	for slotIndex in slotFrames do
+	for slotIndex in cards do
 		renderSlot(slotIndex)
 	end
 end
 
-local function handleSlotAction(slotIndex)
-	if not latestData then
-		return
-	end
-	local incubating = latestData.Incubators[slotIndex]
+local function buildCard(parent, slotIndex)
+	local card = Instance.new("Frame")
+	card.Name = "Slot" .. slotIndex
+	card.BackgroundColor3 = UIHelpers.Colors.PanelRaised
+	card.Size = UDim2.new(1, 0, 0, 112)
+	card.LayoutOrder = slotIndex
+	card.Parent = parent
+	UIHelpers.Corner(card, 16)
 
-	if incubating then
-		if os.time() >= incubating.HatchAt then
-			Remotes.Get("CollectHatch"):InvokeServer(slotIndex)
-			-- no need to manually refresh here - the server's PlayerDataUpdated push does it
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 10)
+	pad.PaddingRight = UDim.new(0, 10)
+	pad.PaddingTop = UDim.new(0, 8)
+	pad.PaddingBottom = UDim.new(0, 8)
+	pad.Parent = card
+
+	local viewportHolder = Instance.new("Frame")
+	viewportHolder.Name = "ViewportHolder"
+	viewportHolder.BackgroundColor3 = UIHelpers.Colors.Panel
+	viewportHolder.Size = UDim2.new(0, 92, 1, 0)
+	viewportHolder.Parent = card
+	UIHelpers.Corner(viewportHolder, 12)
+
+	local info = Instance.new("Frame")
+	info.Name = "Info"
+	info.BackgroundTransparency = 1
+	info.Position = UDim2.new(0, 102, 0, 0)
+	info.Size = UDim2.new(1, -102, 1, 0)
+	info.Parent = card
+
+	local infoLayout = Instance.new("UIListLayout")
+	infoLayout.FillDirection = Enum.FillDirection.Vertical
+	infoLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	infoLayout.Padding = UDim.new(0, 5)
+	infoLayout.Parent = info
+
+	local title = UIHelpers.Label(info, "Empty slot", {
+		bold = true, align = Enum.TextXAlignment.Left,
+		size = UDim2.new(1, 0, 0, 26), maxTextSize = 22, layoutOrder = 1,
+	})
+	local subtitle = UIHelpers.Label(info, "", {
+		muted = true, align = Enum.TextXAlignment.Left,
+		size = UDim2.new(1, 0, 0, 18), maxTextSize = 15, layoutOrder = 2,
+	})
+
+	local trackHolder = Instance.new("Frame")
+	trackHolder.Name = "TrackHolder"
+	trackHolder.BackgroundTransparency = 1
+	trackHolder.Size = UDim2.new(1, 0, 0, 12)
+	trackHolder.LayoutOrder = 3
+	trackHolder.Parent = info
+	local track, setProgress = UIHelpers.ProgressBar(trackHolder, UIHelpers.Colors.Secondary)
+
+	local action = UIHelpers.Button(info, {
+		name = "Action",
+		text = "Place",
+		color = UIHelpers.Colors.Primary,
+		height = 44,
+		layoutOrder = 4,
+	})
+	action.Size = UDim2.new(1, 0, 0, 44)
+
+	local widget = {
+		Frame = card,
+		ViewportHolder = viewportHolder,
+		Title = title,
+		Subtitle = subtitle,
+		Track = track,
+		setProgress = setProgress,
+		Action = action,
+		action = nil,
+		currentCreature = false,
+	}
+	action.Activated:Connect(function()
+		if widget.action then
+			widget.action()
 		end
-		return
-	end
-
-	local eggId = firstCarriedEgg(latestData)
-	if eggId then
-		Remotes.Get("PlaceInIncubator"):InvokeServer(eggId, slotIndex)
-	end
+	end)
+	cards[slotIndex] = widget
+	return widget
 end
 
-function IncubatorUI.Init(gui: ScreenGui)
-	frame = Instance.new("Frame")
-	frame.Name = "IncubatorPanel"
-	frame.AnchorPoint = Vector2.new(0.5, 0.5)
-	frame.Position = UDim2.fromScale(0.5, 0.5)
-	frame.Size = UDim2.new(0.85, 0, 0.5, 0)
-	frame.BackgroundColor3 = UIHelpers.Colors.PanelBackground
-	frame.Visible = false
-	frame.ZIndex = 20
-	frame.Parent = gui
-	UIHelpers.RoundCorner(frame, 18)
-
-	local title = UIHelpers.MakeLabel(frame, "Incubators", 30)
-	title.Font = Enum.Font.GothamBold
-	title.Position = UDim2.new(0, 0, 0, 10)
-	title.Size = UDim2.new(1, 0, 0, 40)
-
-	local closeButton = UIHelpers.MakeButton(frame, "Close", function()
-		frame.Visible = false
+function IncubatorUI.Init(gui)
+	scrim = Instance.new("TextButton")
+	scrim.Name = "IncubatorScrim"
+	scrim.BackgroundColor3 = UIHelpers.Colors.Scrim
+	scrim.BackgroundTransparency = 0.35
+	scrim.Size = UDim2.fromScale(1, 1)
+	scrim.Text = ""
+	scrim.AutoButtonColor = false
+	scrim.Visible = false
+	scrim.ZIndex = 20
+	scrim.Parent = gui
+	scrim.Activated:Connect(function()
+		IncubatorUI.Toggle()
 	end)
-	closeButton.AnchorPoint = Vector2.new(1, 0)
-	closeButton.Position = UDim2.new(1, -10, 0, 10)
-	closeButton.Size = UDim2.new(0, 90, 0, 36)
-	closeButton.BackgroundColor3 = UIHelpers.Colors.ButtonBackgroundSecondary
 
-	local slotsContainer = Instance.new("Frame")
-	slotsContainer.Name = "Slots"
-	slotsContainer.BackgroundTransparency = 1
-	slotsContainer.Position = UDim2.new(0, 0, 0, 60)
-	slotsContainer.Size = UDim2.new(1, 0, 1, -70)
-	slotsContainer.Parent = frame
+	local insets = UIHelpers.SafeInsets()
+
+	root = Instance.new("Frame")
+	root.Name = "IncubatorPanel"
+	root.AnchorPoint = Vector2.new(0.5, 0.5)
+	root.Position = UDim2.fromScale(0.5, 0.5)
+	root.Size = UDim2.new(1, -insets.Side * 2, 0, 330)
+	root.BackgroundColor3 = UIHelpers.Colors.Panel
+	root.Visible = false
+	root.ZIndex = 21
+	root.Parent = scrim
+	UIHelpers.Corner(root, 20)
+
+	local cap = Instance.new("UISizeConstraint")
+	cap.MaxSize = Vector2.new(520, math.huge)
+	cap.Parent = root
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0, 12)
+	pad.PaddingBottom = UDim.new(0, 12)
+	pad.PaddingLeft = UDim.new(0, 12)
+	pad.PaddingRight = UDim.new(0, 12)
+	pad.Parent = root
+
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.BackgroundTransparency = 1
+	header.Size = UDim2.new(1, 0, 0, 44)
+	header.Parent = root
+
+	local title = UIHelpers.Label(header, "Incubators", {
+		bold = true, align = Enum.TextXAlignment.Left,
+		size = UDim2.new(1, -60, 1, 0), maxTextSize = 28,
+	})
+	title.Position = UDim2.new(0, 4, 0, 0)
+
+	local close = UIHelpers.Button(header, {
+		name = "Close", text = "✕", color = UIHelpers.Colors.Neutral,
+		height = 44, width = 44,
+		onClick = function() IncubatorUI.Toggle() end,
+	})
+	close.AnchorPoint = Vector2.new(1, 0.5)
+	close.Position = UDim2.new(1, 0, 0.5, 0)
+
+	local list = Instance.new("Frame")
+	list.Name = "Slots"
+	list.BackgroundTransparency = 1
+	list.Position = UDim2.new(0, 0, 0, 52)
+	list.Size = UDim2.new(1, 0, 1, -52)
+	list.Parent = root
 
 	local listLayout = Instance.new("UIListLayout")
 	listLayout.FillDirection = Enum.FillDirection.Vertical
-	listLayout.Padding = UDim.new(0, 12)
-	listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	listLayout.Parent = slotsContainer
-
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 16)
-	padding.PaddingRight = UDim.new(0, 16)
-	padding.Parent = slotsContainer
+	listLayout.Padding = UDim.new(0, 10)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Parent = list
 
 	for slotIndex = 1, Config.IncubatorSlotCount do
-		local container = Instance.new("Frame")
-		container.Name = "Slot" .. slotIndex
-		container.BackgroundColor3 = UIHelpers.Colors.ButtonBackgroundSecondary
-		container.Size = UDim2.new(1, 0, 0, 90)
-		container.Parent = slotsContainer
-		UIHelpers.RoundCorner(container, 12)
-
-		local innerPadding = Instance.new("UIPadding")
-		innerPadding.PaddingLeft = UDim.new(0, 14)
-		innerPadding.PaddingRight = UDim.new(0, 14)
-		innerPadding.PaddingTop = UDim.new(0, 8)
-		innerPadding.Parent = container
-
-		local nameLabel = UIHelpers.MakeLabel(container, "Empty slot", 22)
-		nameLabel.Font = Enum.Font.GothamBold
-		nameLabel.Size = UDim2.new(0.6, 0, 0, 30)
-		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-		local statusLabel = UIHelpers.MakeLabel(container, "", 18)
-		statusLabel.Position = UDim2.new(0, 0, 0, 32)
-		statusLabel.Size = UDim2.new(0.6, 0, 0, 24)
-		statusLabel.TextColor3 = UIHelpers.Colors.TextDim
-		statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-		local actionButton = UIHelpers.MakeButton(container, "Place Egg", function()
-			handleSlotAction(slotIndex)
-		end)
-		actionButton.AnchorPoint = Vector2.new(1, 0.5)
-		actionButton.Position = UDim2.new(1, 0, 0.5, 0)
-		actionButton.Size = UDim2.new(0, 140, 0, 50)
-		actionButton.Visible = false
-
-		slotFrames[slotIndex] = {
-			Container = container,
-			NameLabel = nameLabel,
-			StatusLabel = statusLabel,
-			ActionButton = actionButton,
-		}
+		buildCard(list, slotIndex)
 	end
 
 	Remotes.Get("PlayerDataUpdated").OnClientEvent:Connect(function(data)
 		latestData = data
 		renderAll()
 	end)
-
 	Remotes.Get("IncubatorUpdated").OnClientEvent:Connect(function(incubators)
 		if latestData then
 			latestData.Incubators = incubators
 		end
 		renderAll()
 	end)
+	Remotes.Get("HatchReady").OnClientEvent:Connect(renderAll)
 
-	Remotes.Get("HatchReady").OnClientEvent:Connect(function()
-		renderAll() -- an incubator just became ready - refresh so "Collect" appears immediately
-	end)
-
-	-- Countdown labels need to tick down even when nothing has changed server-side.
+	-- countdowns have to tick between server pushes
 	task.spawn(function()
 		while true do
 			task.wait(1)
-			if frame.Visible then
+			if root.Visible then
 				renderAll()
 			end
 		end
@@ -206,12 +295,19 @@ function IncubatorUI.Init(gui: ScreenGui)
 end
 
 function IncubatorUI.Toggle()
-	if frame then
-		frame.Visible = not frame.Visible
-		if frame.Visible then
-			renderAll()
-		end
+	if not root then
+		return
 	end
+	local show = not root.Visible
+	root.Visible = show
+	scrim.Visible = show
+	if show then
+		renderAll()
+	end
+end
+
+function IncubatorUI.IsOpen()
+	return root and root.Visible
 end
 
 return IncubatorUI

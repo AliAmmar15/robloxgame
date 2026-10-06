@@ -1,11 +1,11 @@
 --[[
 	DebugPanelUI.lua
 
-	Test tools panel: force a rarity, skip a slot's timer, shorten all timers to 10s, give a
-	free egg, reset my data. The button is always visible (see HUD.lua) but every action goes
-	through a real server remote that checks Studio-or-whitelisted - see DebugService.lua and
-	Config.DebugWhitelist. This file does NOT gate anything itself; it can't, the client can
-	never be trusted for that.
+	Test tools. VISIBILITY is driven by the server-set player attribute "DebugAllowed"
+	(see HUD.lua and DebugService.lua) - the client never decides for itself whether it
+	is allowed. Even if someone forced this panel open, every button below calls a real
+	remote that re-checks Studio-or-whitelist authorization server-side, so a forced
+	panel is a panel full of buttons that all return "not enabled for you".
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,132 +16,224 @@ local UIHelpers = require(script.Parent.UIHelpers)
 
 local DebugPanelUI = {}
 
-local frame
-local statusLabel
-local shortTimersEnabled = false
+local scrim, root, statusLabel, shortTimersButton
+local shortTimersOn = false
 
-local function setStatus(text: string)
-	statusLabel.Text = text
-end
-
-local function callDebugRemote(remoteName: string, ...)
-	local result = Remotes.Get(remoteName):InvokeServer(...)
-	if result.ok then
-		setStatus(remoteName .. ": OK")
-	else
-		setStatus(remoteName .. " failed: " .. tostring(result.error))
+local function setStatus(text, ok)
+	if not statusLabel then
+		return
 	end
-	return result
+	statusLabel.Text = text
+	statusLabel.TextColor3 = ok and UIHelpers.Colors.Success or UIHelpers.Colors.Danger
 end
 
-function DebugPanelUI.Init(gui: ScreenGui)
-	frame = Instance.new("Frame")
-	frame.Name = "DebugPanel"
-	frame.AnchorPoint = Vector2.new(0.5, 0.5)
-	frame.Position = UDim2.fromScale(0.5, 0.5)
-	frame.Size = UDim2.new(0.9, 0, 0.8, 0)
-	frame.BackgroundColor3 = UIHelpers.Colors.PanelBackground
-	frame.Visible = false
-	frame.ZIndex = 30
-	frame.Parent = gui
-	UIHelpers.RoundCorner(frame, 18)
+local function call(remoteName, ...)
+	local okCall, result = pcall(function(...)
+		return Remotes.Get(remoteName):InvokeServer(...)
+	end, ...)
+	if not okCall then
+		setStatus(remoteName .. ": call failed", false)
+		return { ok = false }
+	end
+	if result and result.ok then
+		setStatus(remoteName .. " ✓", true)
+	else
+		setStatus(remoteName .. ": " .. tostring(result and result.error or "failed"), false)
+	end
+	return result or { ok = false }
+end
 
-	local title = UIHelpers.MakeLabel(frame, "Debug Tools", 26)
-	title.Font = Enum.Font.GothamBold
-	title.Position = UDim2.new(0, 0, 0, 10)
-	title.Size = UDim2.new(1, 0, 0, 34)
-
-	local closeButton = UIHelpers.MakeButton(frame, "Close", function()
-		frame.Visible = false
+function DebugPanelUI.Init(gui)
+	scrim = Instance.new("TextButton")
+	scrim.Name = "DebugScrim"
+	scrim.BackgroundColor3 = UIHelpers.Colors.Scrim
+	scrim.BackgroundTransparency = 0.35
+	scrim.Size = UDim2.fromScale(1, 1)
+	scrim.Text = ""
+	scrim.AutoButtonColor = false
+	scrim.Visible = false
+	scrim.ZIndex = 30
+	scrim.Parent = gui
+	scrim.Activated:Connect(function()
+		DebugPanelUI.Toggle()
 	end)
-	closeButton.AnchorPoint = Vector2.new(1, 0)
-	closeButton.Position = UDim2.new(1, -10, 0, 10)
-	closeButton.Size = UDim2.new(0, 90, 0, 36)
-	closeButton.BackgroundColor3 = UIHelpers.Colors.ButtonBackgroundSecondary
+
+	local insets = UIHelpers.SafeInsets()
+
+	root = Instance.new("Frame")
+	root.Name = "DebugPanel"
+	root.AnchorPoint = Vector2.new(0.5, 0.5)
+	root.Position = UDim2.fromScale(0.5, 0.5)
+	root.Size = UDim2.new(1, -insets.Side * 2, 1, -(insets.Top + insets.Bottom + 50))
+	root.BackgroundColor3 = UIHelpers.Colors.Panel
+	root.Visible = false
+	root.ZIndex = 31
+	root.Parent = scrim
+	UIHelpers.Corner(root, 20)
+
+	local cap = Instance.new("UISizeConstraint")
+	cap.MaxSize = Vector2.new(520, 700)
+	cap.Parent = root
+	UIHelpers.Pad(root, 12)
+
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.BackgroundTransparency = 1
+	header.Size = UDim2.new(1, 0, 0, 44)
+	header.Parent = root
+
+	local title = UIHelpers.Label(header, "🛠 Debug Tools", {
+		bold = true, align = Enum.TextXAlignment.Left,
+		size = UDim2.new(1, -60, 1, 0), maxTextSize = 24,
+	})
+	title.Position = UDim2.new(0, 4, 0, 0)
+
+	local close = UIHelpers.Button(header, {
+		name = "Close", text = "✕", color = UIHelpers.Colors.Neutral,
+		height = 44, width = 44,
+		onClick = function() DebugPanelUI.Toggle() end,
+	})
+	close.AnchorPoint = Vector2.new(1, 0.5)
+	close.Position = UDim2.new(1, 0, 0.5, 0)
 
 	local scroller = Instance.new("ScrollingFrame")
 	scroller.Name = "Scroller"
 	scroller.BackgroundTransparency = 1
-	scroller.Position = UDim2.new(0, 0, 0, 54)
-	scroller.Size = UDim2.new(1, 0, 1, -64)
-	scroller.CanvasSize = UDim2.new(0, 0, 0, 0)
+	scroller.BorderSizePixel = 0
+	scroller.Position = UDim2.new(0, 0, 0, 52)
+	scroller.Size = UDim2.new(1, 0, 1, -52)
+	scroller.CanvasSize = UDim2.new()
 	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	scroller.ScrollBarThickness = 8
-	scroller.Parent = frame
+	scroller.ScrollBarThickness = 6
+	scroller.ScrollBarImageColor3 = UIHelpers.Colors.TextMutedOnDark
+	scroller.Parent = root
 
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Vertical
-	layout.Padding = UDim.new(0, 10)
+	layout.Padding = UDim.new(0, 8)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = scroller
 
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 16)
-	padding.PaddingRight = UDim.new(0, 16)
-	padding.Parent = scroller
+	local order = 0
+	local function nextOrder()
+		order += 1
+		return order
+	end
 
-	-- Force rarity: one row of 6 buttons.
-	local forceLabel = UIHelpers.MakeLabel(scroller, "Force next egg's rarity:", 18)
-	forceLabel.TextXAlignment = Enum.TextXAlignment.Left
-	forceLabel.Size = UDim2.new(1, 0, 0, 24)
+	-- ---- force rarity ----
+	UIHelpers.Label(scroller, "Force next egg's rarity", {
+		muted = true, align = Enum.TextXAlignment.Left,
+		size = UDim2.new(1, 0, 0, 20), maxTextSize = 15, layoutOrder = nextOrder(),
+	})
 
-	local forceRow = Instance.new("Frame")
-	forceRow.BackgroundTransparency = 1
-	forceRow.Size = UDim2.new(1, 0, 0, 44)
-	forceRow.Parent = scroller
-	local forceRowLayout = Instance.new("UIGridLayout")
-	forceRowLayout.CellPadding = UDim2.new(0, 6, 0, 6)
-	forceRowLayout.CellSize = UDim2.new(0.31, 0, 0, 40)
-	forceRowLayout.Parent = forceRow
+	local rarityRow = Instance.new("Frame")
+	rarityRow.Name = "RarityRow"
+	rarityRow.BackgroundTransparency = 1
+	rarityRow.Size = UDim2.new(1, 0, 0, 104)
+	rarityRow.LayoutOrder = nextOrder()
+	rarityRow.Parent = scroller
+
+	local rarityGrid = Instance.new("UIGridLayout")
+	rarityGrid.CellPadding = UDim2.new(0, 6, 0, 6)
+	rarityGrid.CellSize = UDim2.new(0.333, -6, 0, 48)
+	rarityGrid.Parent = rarityRow
 
 	for _, rarity in Config.Rarities do
-		local button = UIHelpers.MakeButton(forceRow, rarity.Id, function()
-			callDebugRemote("DebugForceRarity", rarity.Id)
-		end)
-		button.BackgroundColor3 = Config.RarityColor[rarity.Id]
-		button.TextColor3 = Color3.new(0, 0, 0)
+		local b = UIHelpers.Button(rarityRow, {
+			name = rarity.Id,
+			text = rarity.Id,
+			color = Config.RarityColor[rarity.Id],
+			height = 48,
+			onClick = function()
+				call("DebugForceRarity", rarity.Id)
+			end,
+		})
+		b.Size = UDim2.new(0.333, -6, 0, 48)
 	end
 
-	-- Skip timer: one button per incubator slot.
-	local skipLabel = UIHelpers.MakeLabel(scroller, "Skip incubator timer:", 18)
-	skipLabel.TextXAlignment = Enum.TextXAlignment.Left
-	skipLabel.Size = UDim2.new(1, 0, 0, 24)
-
+	-- ---- skip timers ----
+	UIHelpers.Label(scroller, "Incubators", {
+		muted = true, align = Enum.TextXAlignment.Left,
+		size = UDim2.new(1, 0, 0, 20), maxTextSize = 15, layoutOrder = nextOrder(),
+	})
 	for slotIndex = 1, Config.IncubatorSlotCount do
-		UIHelpers.MakeButton(scroller, "Skip Slot " .. slotIndex, function()
-			callDebugRemote("DebugSkipTimer", slotIndex)
-		end)
+		UIHelpers.Button(scroller, {
+			name = "SkipSlot" .. slotIndex,
+			text = "Skip Slot " .. slotIndex .. " timer",
+			color = UIHelpers.Colors.Secondary,
+			layoutOrder = nextOrder(),
+			onClick = function()
+				call("DebugSkipTimer", slotIndex)
+			end,
+		})
 	end
 
-	-- Shorten all timers toggle.
-	local shortTimersButton = UIHelpers.MakeButton(scroller, "Shorten All Timers: OFF", function()
-		shortTimersEnabled = not shortTimersEnabled
-		local result = callDebugRemote("DebugSetShortTimers", shortTimersEnabled)
+	shortTimersButton = UIHelpers.Button(scroller, {
+		name = "ShortTimers",
+		text = "Short timers: OFF",
+		color = UIHelpers.Colors.Neutral,
+		layoutOrder = nextOrder(),
+	})
+	shortTimersButton.Activated:Connect(function()
+		local want = not shortTimersOn
+		local result = call("DebugSetShortTimers", want)
 		if result.ok then
-			shortTimersButton.Text = "Shorten All Timers: " .. (shortTimersEnabled and "ON" or "OFF")
-		else
-			shortTimersEnabled = not shortTimersEnabled -- revert on failure
+			shortTimersOn = want
+			shortTimersButton.Text = "Short timers: " .. (want and "ON (10s)" or "OFF")
+			shortTimersButton.BackgroundColor3 = want and UIHelpers.Colors.Success or UIHelpers.Colors.Neutral
 		end
 	end)
 
-	UIHelpers.MakeButton(scroller, "Give Free Egg Now", function()
-		callDebugRemote("DebugGiveFreeEgg")
-	end)
+	-- ---- eggs / data ----
+	UIHelpers.Label(scroller, "Eggs & data", {
+		muted = true, align = Enum.TextXAlignment.Left,
+		size = UDim2.new(1, 0, 0, 20), maxTextSize = 15, layoutOrder = nextOrder(),
+	})
+	UIHelpers.Button(scroller, {
+		name = "GiveEgg",
+		text = "Give free egg now",
+		color = UIHelpers.Colors.Primary,
+		layoutOrder = nextOrder(),
+		onClick = function()
+			call("DebugGiveFreeEgg")
+		end,
+	})
+	UIHelpers.Button(scroller, {
+		name = "ResetData",
+		text = "Reset my data",
+		color = UIHelpers.Colors.Danger,
+		layoutOrder = nextOrder(),
+		onClick = function()
+			call("DebugResetData")
+		end,
+	})
 
-	local resetButton = UIHelpers.MakeButton(scroller, "Reset My Data", function()
-		callDebugRemote("DebugResetData")
-	end)
-	resetButton.BackgroundColor3 = Color3.fromRGB(200, 70, 70)
-
-	statusLabel = UIHelpers.MakeLabel(scroller, "", 16)
-	statusLabel.TextColor3 = UIHelpers.Colors.TextDim
-	statusLabel.Size = UDim2.new(1, 0, 0, 40)
+	statusLabel = UIHelpers.Label(scroller, "", {
+		align = Enum.TextXAlignment.Left,
+		size = UDim2.new(1, 0, 0, 36), maxTextSize = 14, layoutOrder = nextOrder(),
+	})
 	statusLabel.TextWrapped = true
 end
 
 function DebugPanelUI.Toggle()
-	if frame then
-		frame.Visible = not frame.Visible
+	if not root then
+		return
 	end
+	local show = not root.Visible
+	root.Visible = show
+	scrim.Visible = show
+end
+
+-- Called by HUD when the server says this player is NOT allowed to use debug tools.
+function DebugPanelUI.ForceHide()
+	if root then
+		root.Visible = false
+		scrim.Visible = false
+	end
+end
+
+function DebugPanelUI.IsOpen()
+	return root and root.Visible
 end
 
 return DebugPanelUI

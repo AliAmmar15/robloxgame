@@ -28,7 +28,17 @@ local SPEED_TICK_SECONDS = 1
 -- against, so a full server-authority movement system is out of scope for this prototype.
 -- This just logs if someone is moving implausibly fast, so it's visible if it ever matters.
 local SPEED_TOLERANCE_MULTIPLIER = 2.5 -- generous, to avoid false positives from jumps/falls/lag
+local SPEED_WARN_STREAK = 3 -- consecutive bad ticks before we say anything
+local SPEED_WARN_COOLDOWN = 30 -- seconds between warnings per player, so it can't flood the log
 local lastPosition = {} -- userId -> Vector3, for the distance-per-tick check below
+local speedStreak = {} -- userId -> consecutive implausible ticks
+local lastSpeedWarn = {} -- userId -> os.time() of the last warning
+
+-- Respawns, spawn-point placement, and admin/Studio teleports all legitimately move a
+-- character a long way in one tick. Skipping one tick after the character appears (and
+-- requiring a STREAK below) keeps those out of the log - a real speed hack is sustained,
+-- a teleport is a single spike.
+local skipNextSpeedCheck = {} -- userId -> true
 
 -- nestIndex -> Part. Built once at Start() from World's tagged instances - never hardcode
 -- a Workspace path, World might reshuffle the layout.
@@ -39,24 +49,88 @@ local nestParts = {}
 -- always have a target again on a fresh server, per the GDD.
 local nestState = {}
 
+local function registerNest(part)
+	local index = part:GetAttribute("NestIndex")
+	if not index then
+		warn("[RaidService] A NestSlot-tagged part has no NestIndex attribute: " .. part:GetFullName())
+		return
+	end
+	nestParts[index] = part
+	nestState[index] = nestState[index] or { Available = true, RespawnAt = 0 }
+end
+
 local function buildNestLookup()
 	nestParts = {}
 	nestState = {}
 	for _, part in CollectionService:GetTagged("NestSlot") do
-		local index = part:GetAttribute("NestIndex")
-		if index then
-			nestParts[index] = part
-			nestState[index] = { Available = true, RespawnAt = 0 }
-		else
-			warn("[RaidService] A NestSlot-tagged part has no NestIndex attribute: " .. part:GetFullName())
+		registerNest(part)
+	end
+end
+
+-- Shows/hides the egg sitting in a nest. The egg is a Model child named "Egg" that World
+-- builds; we toggle transparency rather than destroying it, so the nest can refill without
+-- the server needing to know how the egg was put together.
+local function setNestEggVisible(nestIndex, visible)
+	local nestPart = nestParts[nestIndex]
+	local egg = nestPart and nestPart:FindFirstChild("Egg")
+	if not egg then
+		return
+	end
+	for _, d in egg:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Transparency = visible and 0 or 1
 		end
 	end
+end
+
+-- A little burst when a nest refills, so a player standing nearby sees it come back
+-- instead of an egg silently blinking into existence.
+local function respawnPuff(nestIndex)
+	local nestPart = nestParts[nestIndex]
+	if not nestPart then
+		return
+	end
+	local holder = Instance.new("Part")
+	holder.Anchored = true
+	holder.CanCollide = false
+	holder.CanQuery = false
+	holder.Transparency = 1
+	holder.Size = Vector3.new(1, 1, 1)
+	holder.Position = nestPart.Position + Vector3.new(0, 2, 0)
+	holder.Parent = workspace
+
+	local att = Instance.new("Attachment")
+	att.Parent = holder
+
+	local e = Instance.new("ParticleEmitter")
+	e.Texture = "rbxasset://textures/particles/smoke_main.dds"
+	e.Lifetime = NumberRange.new(0.35, 0.7)
+	e.Rate = 0
+	e.Speed = NumberRange.new(4, 8)
+	e.SpreadAngle = Vector2.new(180, 180)
+	e.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.6),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	e.Color = ColorSequence.new(Color3.fromRGB(255, 250, 235))
+	e.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	e.Parent = att
+	e:Emit(18)
+
+	task.delay(1.5, function()
+		holder:Destroy()
+	end)
 end
 
 local function refreshNestAvailability(nestIndex)
 	local state = nestState[nestIndex]
 	if state and not state.Available and os.time() >= state.RespawnAt then
 		state.Available = true
+		setNestEggVisible(nestIndex, true)
+		respawnPuff(nestIndex)
 	end
 end
 
@@ -80,6 +154,71 @@ local function applyCarrySpeed(player, data)
 		return
 	end
 	humanoid.WalkSpeed = DEFAULT_WALK_SPEED * worstCarryMultiplier(data)
+end
+
+-- The rarest egg currently carried, or nil. Used to decide what the player visibly holds.
+local function rarestCarried(data)
+	local bestEgg, bestIndex
+	for _, egg in data.CarriedEggs do
+		for i, rarity in Config.Rarities do
+			if rarity.Id == egg.Rarity then
+				if not bestIndex or i > bestIndex then
+					bestEgg, bestIndex = egg, i
+				end
+				break
+			end
+		end
+	end
+	return bestEgg
+end
+
+-- Shows a small egg floating above the player's head while carrying, tinted and scaled
+-- by rarity. Built on the SERVER so everyone sees it, not just the carrier.
+local function updateCarryVisual(player, data)
+	local character = player.Character
+	local head = character and character:FindFirstChild("Head")
+	if not head then
+		return
+	end
+
+	local existing = head:FindFirstChild("CarriedEggVisual")
+	local egg = rarestCarried(data)
+
+	if not egg then
+		if existing then
+			existing:Destroy()
+		end
+		return
+	end
+
+	local color = Config.RarityColor[egg.Rarity] or Color3.new(1, 1, 1)
+	-- rarer = bigger, so "this one is heavy" reads at a glance as well as in the walkspeed
+	local scaleByRarity = {
+		Common = 0.9, Uncommon = 1.0, Rare = 1.1, Epic = 1.2, Legendary = 1.35, Mythic = 1.5,
+	}
+	local scale = scaleByRarity[egg.Rarity] or 1
+
+	local shell = existing
+	if not shell then
+		shell = Instance.new("Part")
+		shell.Name = "CarriedEggVisual"
+		shell.Shape = Enum.PartType.Ball
+		shell.Anchored = false
+		shell.CanCollide = false
+		shell.CanQuery = false
+		shell.Massless = true
+		shell.Material = Enum.Material.SmoothPlastic
+		shell.Parent = head
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = shell
+		weld.Part1 = head
+		weld.Parent = shell
+	end
+
+	shell.Size = Vector3.new(1.1, 1.4, 1.1) * scale
+	shell.Color = color
+	shell.CFrame = head.CFrame * CFrame.new(0, 1.5 * scale, 0)
 end
 
 local function handleGrabEgg(player, nestIndex)
@@ -115,6 +254,7 @@ local function handleGrabEgg(player, nestIndex)
 	-- passing validation and duplicating an egg from one nest.
 	state.Available = false
 	state.RespawnAt = os.time() + Config.NestRespawnSeconds
+	setNestEggVisible(nestIndex, false)
 
 	local ok, eggId, creatureId, rarity = EggService.RollAndGrantEgg(player)
 	if not ok then
@@ -122,12 +262,14 @@ local function handleGrabEgg(player, nestIndex)
 		-- than punishing the player for a server-side failure that wasn't their fault.
 		state.Available = true
 		state.RespawnAt = 0
+		setNestEggVisible(nestIndex, true)
 		return { ok = false, error = "Could not grant an egg right now." }
 	end
 
 	local data = PlayerDataService.Get(player)
 	if data then
 		applyCarrySpeed(player, data)
+		updateCarryVisual(player, data)
 	end
 
 	EventLog.FirstGrab(player)
@@ -149,17 +291,46 @@ local function setupCharacter(player, character)
 		if data then
 			data.CarriedEggs = {}
 			Remotes.Get("PlayerDataUpdated"):FireClient(player, data)
+			updateCarryVisual(player, data) -- removes the egg from the corpse's head
 		end
 		humanoid.WalkSpeed = DEFAULT_WALK_SPEED
 	end)
+
+	-- a freshly spawned character has no egg on its head yet; restore it if still carrying
+	local data = PlayerDataService.Get(player)
+	if data then
+		updateCarryVisual(player, data)
+	end
 end
 
 function RaidService.Start()
 	buildNestLookup()
 
+	-- Nests created/removed after boot (map rebuilds, streaming) stay in sync without any
+	-- hardcoded count or path.
+	CollectionService:GetInstanceAddedSignal("NestSlot"):Connect(registerNest)
+	CollectionService:GetInstanceRemovedSignal("NestSlot"):Connect(function(part)
+		local index = part:GetAttribute("NestIndex")
+		if index and nestParts[index] == part then
+			nestParts[index] = nil
+			nestState[index] = nil
+		end
+	end)
+
 	Remotes.Get("GrabEgg").OnServerInvoke = function(player, nestIndex)
 		return handleGrabEgg(player, nestIndex)
 	end
+
+	-- Refill emptied nests on their timer, even with nobody standing nearby to trigger
+	-- the lazy check inside handleGrabEgg.
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for nestIndex in nestState do
+				refreshNestAvailability(nestIndex)
+			end
+		end
+	end)
 
 	Players.PlayerAdded:Connect(function(player)
 		player.CharacterAdded:Connect(function(character)
@@ -186,6 +357,7 @@ function RaidService.Start()
 				local data = PlayerDataService.Get(player)
 				if data then
 					applyCarrySpeed(player, data)
+					updateCarryVisual(player, data)
 				end
 
 				local character = player.Character

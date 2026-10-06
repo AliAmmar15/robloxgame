@@ -1,10 +1,11 @@
 --[[
 	NestInteractionUI.lua
 
-	Adds a ProximityPrompt to every NestSlot part (built by World, found via CollectionService
-	- never a hardcoded Workspace path). Triggering one calls GrabEgg; the server does the real
-	distance/state validation regardless of what the prompt itself allowed, so this is purely
-	about giving the player a mobile-friendly "hold to grab" button over each nest.
+	Puts a ProximityPrompt on every NestSlot-tagged part and wires it to GrabEgg.
+
+	Nests are found by TAG and the script also listens for tags added later, so changing
+	how many nests exist (3 -> 6 -> whatever) needs no code change here. The server does
+	the real distance/state validation regardless of what the prompt allowed.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -16,65 +17,126 @@ local RevealUI = require(script.Parent.RevealUI)
 
 local NestInteractionUI = {}
 
-local toastLabel
+local toast
+local wired = {} -- nest part -> true
 
-local function showToast(text: string)
-	if not toastLabel then
+local function showToast(text)
+	if not toast then
 		return
 	end
-	toastLabel.Text = text
-	toastLabel.Visible = true
-	task.delay(2, function()
-		if toastLabel.Text == text then
-			toastLabel.Visible = false
+	toast.Text = text
+	toast.Visible = true
+	task.delay(2.2, function()
+		if toast.Text == text then
+			toast.Visible = false
 		end
 	end)
 end
 
-local function setupPrompt(nestPart: BasePart)
+-- A quick client-side sparkle at the nest, so a successful grab feels physical even
+-- though the egg itself is removed by the server.
+local function sparkle(position)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.Transparency = 1
+	p.Size = Vector3.new(1, 1, 1)
+	p.Position = position
+	p.Parent = workspace
+
+	local att = Instance.new("Attachment")
+	att.Parent = p
+
+	local e = Instance.new("ParticleEmitter")
+	e.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	e.Lifetime = NumberRange.new(0.4, 0.8)
+	e.Rate = 0
+	e.Speed = NumberRange.new(6, 11)
+	e.SpreadAngle = Vector2.new(180, 180)
+	e.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.1),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	e.Color = ColorSequence.new(Color3.fromRGB(255, 232, 150))
+	e.LightEmission = 0.8
+	e.Parent = att
+	e:Emit(26)
+
+	task.delay(1.4, function()
+		p:Destroy()
+	end)
+end
+
+local function wireNest(nestPart)
+	if wired[nestPart] then
+		return
+	end
 	local nestIndex = nestPart:GetAttribute("NestIndex")
 	if not nestIndex then
+		warn("[NestInteractionUI] NestSlot part with no NestIndex: " .. nestPart:GetFullName())
 		return
+	end
+	wired[nestPart] = true
+
+	local existing = nestPart:FindFirstChild("GrabEggPrompt")
+	if existing then
+		existing:Destroy()
 	end
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "GrabEggPrompt"
 	prompt.ActionText = "Grab Egg"
 	prompt.ObjectText = "Nest"
-	prompt.HoldDuration = 0.3
+	prompt.HoldDuration = 0.25
 	prompt.MaxActivationDistance = 10
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = nestPart
 
 	prompt.Triggered:Connect(function()
-		prompt.Enabled = false -- avoid double-fires while the request is in flight
-		local result = Remotes.Get("GrabEgg"):InvokeServer(nestIndex)
+		prompt.Enabled = false -- block double-fire while the request is in flight
+		local okCall, result = pcall(function()
+			return Remotes.Get("GrabEgg"):InvokeServer(nestIndex)
+		end)
 		prompt.Enabled = true
 
-		if result.ok then
+		if not okCall then
+			showToast("Something went wrong — try again")
+			return
+		end
+		if result and result.ok then
+			sparkle(nestPart.Position + Vector3.new(0, 2, 0))
 			RevealUI.Show(result.creatureId, result.rarity)
 		else
-			showToast(tostring(result.error))
+			showToast(tostring(result and result.error or "Could not grab that egg"))
 		end
 	end)
 end
 
-function NestInteractionUI.Init(gui: ScreenGui)
-	toastLabel = UIHelpers.MakeLabel(gui, "", 18)
-	toastLabel.Name = "NestToast"
-	toastLabel.AnchorPoint = Vector2.new(0.5, 1)
-	toastLabel.Position = UDim2.new(0.5, 0, 1, -100)
-	toastLabel.Size = UDim2.new(0.7, 0, 0, 30)
-	toastLabel.BackgroundColor3 = UIHelpers.Colors.PanelBackground
-	toastLabel.BackgroundTransparency = 0.2
-	toastLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-	toastLabel.Visible = false
-	toastLabel.ZIndex = 15
-	UIHelpers.RoundCorner(toastLabel, 8)
+function NestInteractionUI.Init(gui)
+	local insets = UIHelpers.SafeInsets()
+
+	toast = UIHelpers.Label(gui, "", { bold = true, maxTextSize = 16 })
+	toast.Name = "NestToast"
+	toast.AnchorPoint = Vector2.new(0.5, 1)
+	toast.Position = UDim2.new(0.5, 0, 1, -(insets.Bottom + 76))
+	toast.Size = UDim2.new(0, 300, 0, 38)
+	toast.BackgroundColor3 = UIHelpers.Colors.Panel
+	toast.BackgroundTransparency = 0.05
+	toast.TextColor3 = UIHelpers.Colors.Primary
+	toast.Visible = false
+	toast.ZIndex = 15
+	UIHelpers.Corner(toast, 12)
+	UIHelpers.Stroke(toast, UIHelpers.Colors.PanelRaised, 2)
 
 	for _, nestPart in CollectionService:GetTagged("NestSlot") do
-		setupPrompt(nestPart)
+		wireNest(nestPart)
 	end
+	-- nests added after the client booted (map rebuild, streaming) get wired too
+	CollectionService:GetInstanceAddedSignal("NestSlot"):Connect(wireNest)
+	CollectionService:GetInstanceRemovedSignal("NestSlot"):Connect(function(nestPart)
+		wired[nestPart] = nil
+	end)
 end
 
 return NestInteractionUI
